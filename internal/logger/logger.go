@@ -13,6 +13,21 @@ import (
 	"github.com/aaronsb/yay-friend/internal/types"
 )
 
+// getDataDir returns the XDG-compliant data directory for evaluations
+func getDataDir() string {
+	if xdgData := os.Getenv("XDG_DATA_HOME"); xdgData != "" {
+		return filepath.Join(xdgData, "yay-friend")
+	}
+	
+	home, err := os.UserHomeDir()
+	if err != nil {
+		// Fallback to current directory if we can't determine home
+		return ".yay-friend"
+	}
+	
+	return filepath.Join(home, ".local", "share", "yay-friend")
+}
+
 // EvaluationLog represents a single security evaluation record
 type EvaluationLog struct {
 	ID             string                  `json:"id"`             // Unique identifier for this evaluation
@@ -34,12 +49,7 @@ type Logger struct {
 
 // NewLogger creates a new logger instance
 func NewLogger() (*Logger, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get user home directory: %w", err)
-	}
-
-	logDir := filepath.Join(home, ".yay-friend", "evaluations")
+	logDir := filepath.Join(getDataDir(), "evaluations")
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create log directory: %w", err)
 	}

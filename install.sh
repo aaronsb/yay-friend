@@ -145,8 +145,18 @@ install_binary() {
 init_config() {
     print_info "Initializing configuration..."
     
+    # Check XDG-compliant config directory
+    local config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/yay-friend"
+    
+    # Also check legacy directory and inform user
     if [[ -d "$HOME/.yay-friend" ]]; then
-        print_warning "Configuration directory already exists at $HOME/.yay-friend"
+        print_warning "Legacy configuration directory found at $HOME/.yay-friend"
+        print_info "yay-friend now uses XDG Base Directory specification: $config_dir"
+        print_info "Consider migrating your configuration manually if needed"
+    fi
+    
+    if [[ -d "$config_dir" ]]; then
+        print_warning "Configuration directory already exists at $config_dir"
         read -p "Do you want to reinitialize? [y/N]: " -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then

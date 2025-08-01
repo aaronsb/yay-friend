@@ -2,15 +2,34 @@ package reporter
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/aaronsb/yay-friend/internal/types"
 )
+
+// getDataDir returns the XDG-compliant data directory for reports
+func getDataDir() string {
+	if xdgData := os.Getenv("XDG_DATA_HOME"); xdgData != "" {
+		return filepath.Join(xdgData, "yay-friend")
+	}
+	
+	home, err := os.UserHomeDir()
+	if err != nil {
+		// Fallback to current directory if we can't determine home
+		return ".yay-friend"
+	}
+	
+	return filepath.Join(home, ".local", "share", "yay-friend")
+}
 
 // MaliciousPackageReport represents a report of a potentially malicious package
 type MaliciousPackageReport struct {
@@ -53,12 +72,7 @@ type ReporterConfig struct {
 
 // NewReporter creates a new reporter instance
 func NewReporter() (*Reporter, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get user home directory: %w", err)
-	}
-
-	reportDir := filepath.Join(home, ".yay-friend", "reports")
+	reportDir := filepath.Join(getDataDir(), "reports")
 	if err := os.MkdirAll(reportDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create reports directory: %w", err)
 	}
@@ -259,12 +273,6 @@ func (r *Reporter) GetReports(packageName string, days int) ([]MaliciousPackageR
 }
 
 // Utility functions
-
-import (
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
-)
 
 func generateAnonymousID() string {
 	// Generate a random 16-byte ID

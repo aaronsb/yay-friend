@@ -182,13 +182,17 @@ make
 
 ## 📁 Directory Structure
 
+XDG Base Directory compliant:
+
 ```
-~/.yay-friend/
+${XDG_CONFIG_HOME:-$HOME/.config}/yay-friend/
 ├── config.yaml          # Main configuration
-├── evaluations/          # Individual analysis JSON files
-├── reports/             # Malicious package reports  
 ├── providers/           # AI provider configurations
 └── cache/              # Temporary analysis data
+
+${XDG_DATA_HOME:-$HOME/.local/share}/yay-friend/
+├── evaluations/          # Individual analysis JSON files
+└── reports/             # Malicious package reports
 ```
 
 ## 🔧 Configuration
@@ -224,7 +228,7 @@ yay-friend test some-git-package
 yay-friend provider test
 
 # View recent evaluations
-ls -la ~/.yay-friend/evaluations/
+ls -la "${XDG_DATA_HOME:-$HOME/.local/share}/yay-friend/evaluations/"
 ```
 
 ## 🤝 Contributing

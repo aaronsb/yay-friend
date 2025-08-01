@@ -11,6 +11,21 @@ import (
 	"github.com/aaronsb/yay-friend/internal/types"
 )
 
+// getConfigDir returns the XDG-compliant config directory
+func getConfigDir() string {
+	if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
+		return filepath.Join(xdgConfig, "yay-friend")
+	}
+	
+	home, err := os.UserHomeDir()
+	if err != nil {
+		// Fallback to current directory if we can't determine home
+		return ".yay-friend"
+	}
+	
+	return filepath.Join(home, ".config", "yay-friend")
+}
+
 // Load loads the configuration from file
 func Load() (*types.Config, error) {
 	// For now, return hardcoded sensible defaults to get the tool working
@@ -55,12 +70,7 @@ func Load() (*types.Config, error) {
 
 // InitializeConfig creates a default configuration directory and file
 func InitializeConfig() error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("failed to get user home directory: %w", err)
-	}
-
-	configDir := filepath.Join(home, ".yay-friend")
+	configDir := getConfigDir()
 	configPath := filepath.Join(configDir, "config.yaml")
 
 	// Create config directory if it doesn't exist

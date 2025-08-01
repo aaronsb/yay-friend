@@ -18,6 +18,21 @@ import (
 	"github.com/aaronsb/yay-friend/internal/yay"
 )
 
+// getConfigDir returns the XDG-compliant config directory
+func getConfigDir() string {
+	if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
+		return filepath.Join(xdgConfig, "yay-friend")
+	}
+	
+	home, err := os.UserHomeDir()
+	if err != nil {
+		// Fallback to current directory if we can't determine home
+		return ".yay-friend"
+	}
+	
+	return filepath.Join(home, ".config", "yay-friend")
+}
+
 var (
 	cfgFile      string
 	verbose      bool
@@ -57,7 +72,7 @@ func init() {
 	cobra.OnInitialize(initConfig)
 
 	// Global flags
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.yay-friend.yaml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is ${XDG_CONFIG_HOME:-$HOME/.config}/yay-friend/config.yaml)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 	rootCmd.PersistentFlags().BoolVar(&skipAnalysis, "skip-analysis", false, "skip security analysis and proceed directly to yay")
 	rootCmd.PersistentFlags().StringVar(&provider, "provider", "", "AI provider to use (claude, qwen, copilot, goose)")
@@ -84,10 +99,7 @@ func initConfig() {
 	if cfgFile != "" {
 		viper.SetConfigFile(cfgFile)
 	} else {
-		home, err := os.UserHomeDir()
-		cobra.CheckErr(err)
-
-		configDir := filepath.Join(home, ".yay-friend")
+		configDir := getConfigDir()
 		viper.AddConfigPath(configDir)
 		viper.SetConfigType("yaml")
 		viper.SetConfigName("config")
