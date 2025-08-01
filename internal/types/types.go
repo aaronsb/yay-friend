@@ -71,16 +71,18 @@ type SecurityFinding struct {
 
 // SecurityAnalysis represents the complete security analysis of a PKGBUILD
 type SecurityAnalysis struct {
-	PackageName       string            `json:"package_name"`
-	OverallEntropy    SecurityEntropy   `json:"overall_entropy"`    // Primary entropy assessment
-	OverallLevel      SecurityLevel     `json:"overall_level"`      // Legacy compatibility
-	Findings          []SecurityFinding `json:"findings"`
-	Summary           string            `json:"summary"`
-	Recommendation    string            `json:"recommendation"`
-	AnalyzedAt        time.Time         `json:"analyzed_at"`
-	Provider          string            `json:"provider"`
-	EntropyFactors    []string          `json:"entropy_factors,omitempty"`    // What contributed to entropy
-	PredictabilityScore float64         `json:"predictability_score,omitempty"` // 0.0 (chaotic) to 1.0 (predictable)
+	PackageName         string            `json:"package_name"`
+	OverallEntropy      SecurityEntropy   `json:"overall_entropy"`    // Primary entropy assessment
+	OverallLevel        SecurityLevel     `json:"overall_level"`      // Legacy compatibility
+	Findings            []SecurityFinding `json:"findings"`
+	Summary             string            `json:"summary"`
+	Recommendation      string            `json:"recommendation"`
+	AnalyzedAt          time.Time         `json:"analyzed_at"`
+	Provider            string            `json:"provider"`
+	EntropyFactors      []string          `json:"entropy_factors,omitempty"`      // What contributed to entropy
+	PredictabilityScore float64           `json:"predictability_score,omitempty"` // 0.0 (chaotic) to 1.0 (predictable)
+	EducationalSummary  string            `json:"educational_summary,omitempty"`  // Educational context for users
+	SecurityLessons     []string          `json:"security_lessons,omitempty"`     // Key takeaways for learning
 }
 
 // PackageInfo represents basic package information
@@ -91,6 +93,16 @@ type PackageInfo struct {
 	URL         string `json:"url"`
 	Maintainer  string `json:"maintainer"`
 	PKGBUILD    string `json:"pkgbuild"`
+	// AUR page context
+	AURPageURL       string   `json:"aur_page_url,omitempty"`
+	LastUpdated      string   `json:"last_updated,omitempty"`
+	FirstSubmitted   string   `json:"first_submitted,omitempty"`
+	Votes            int      `json:"votes,omitempty"`
+	Popularity       float64  `json:"popularity,omitempty"`
+	Comments         []string `json:"comments,omitempty"`
+	Dependencies     []string `json:"dependencies,omitempty"`
+	MakeDepends      []string `json:"make_depends,omitempty"`
+	OptDepends       []string `json:"opt_depends,omitempty"`
 }
 
 // AIProvider interface for different AI backends

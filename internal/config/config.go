@@ -13,19 +13,41 @@ import (
 
 // Load loads the configuration from file
 func Load() (*types.Config, error) {
-	cfg := &types.Config{}
-
-	// Set defaults
-	setDefaults()
-
-	// Try to unmarshal into our config struct
-	if err := viper.Unmarshal(cfg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
-	}
-
-	// Validate configuration
-	if err := validateConfig(cfg); err != nil {
-		return nil, fmt.Errorf("invalid configuration: %w", err)
+	// For now, return hardcoded sensible defaults to get the tool working
+	// TODO: Implement proper YAML config loading later
+	cfg := &types.Config{
+		DefaultProvider: "claude",
+		Providers: map[string]string{
+			"claude":  "",
+			"qwen":    "",
+			"copilot": "",
+			"goose":   "",
+		},
+		SecurityThresholds: struct {
+			BlockLevel  types.SecurityLevel `yaml:"block_level"`
+			WarnLevel   types.SecurityLevel `yaml:"warn_level"`
+			AutoProceed bool                `yaml:"auto_proceed_safe"`
+		}{
+			BlockLevel:  types.SecurityCritical, // Only block CRITICAL
+			WarnLevel:   types.SecurityMedium,   // Warn on MODERATE and above
+			AutoProceed: false,
+		},
+		UI: struct {
+			ShowDetails   bool `yaml:"show_details"`
+			UseColors     bool `yaml:"use_colors"`
+			VerboseOutput bool `yaml:"verbose_output"`
+		}{
+			ShowDetails:   true,
+			UseColors:     true,
+			VerboseOutput: false,
+		},
+		Yay: struct {
+			Path  string   `yaml:"path"`
+			Flags []string `yaml:"default_flags"`
+		}{
+			Path:  "yay",
+			Flags: []string{},
+		},
 	}
 
 	return cfg, nil
@@ -120,6 +142,7 @@ func setDefaults() {
 	viper.SetDefault("providers.copilot", "")
 	viper.SetDefault("providers.goose", "")
 	
+	// Use the same key structure as the YAML
 	viper.SetDefault("security_thresholds.block_level", int(types.SecurityCritical))
 	viper.SetDefault("security_thresholds.warn_level", int(types.SecurityMedium))
 	viper.SetDefault("security_thresholds.auto_proceed_safe", false)

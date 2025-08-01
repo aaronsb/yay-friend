@@ -56,13 +56,17 @@ func (c *ClaudeProvider) AnalyzePKGBUILD(ctx context.Context, pkgInfo types.Pack
 
 	prompt := c.buildSecurityPrompt(pkgInfo)
 	
-	// Run claude with the prompt via stdin
+	fmt.Printf("🤖 Analyzing with Claude...\n")
+	
+	// Run claude with the prompt via stdin (simple approach)
 	cmd := exec.CommandContext(ctx, "claude")
 	cmd.Stdin = strings.NewReader(prompt)
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("claude analysis failed: %w", err)
 	}
+	
+	fmt.Printf("🔄 Processing analysis results...\n")
 
 	// Parse the response
 	analysis, err := c.parseAnalysisResponse(string(output), pkgInfo)
@@ -83,40 +87,129 @@ func (c *ClaudeProvider) GetCapabilities() types.ProviderCapabilities {
 	}
 }
 
-// buildSecurityPrompt creates the security analysis prompt
+// buildSecurityPrompt creates the security analysis prompt with content truncation
 func (c *ClaudeProvider) buildSecurityPrompt(pkgInfo types.PackageInfo) string {
-	return fmt.Sprintf(`You are a security expert analyzing PKGBUILD files from the Arch User Repository (AUR) for potential security issues. 
+	// Truncate PKGBUILD if too long (200 lines max as suggested)
+	pkgbuildLines := strings.Split(pkgInfo.PKGBUILD, "\n")
+	if len(pkgbuildLines) > 200 {
+		pkgbuildLines = pkgbuildLines[:200]
+		pkgbuildLines = append(pkgbuildLines, "", "... [TRUNCATED - Original PKGBUILD longer than 200 lines]")
+	}
+	truncatedPKGBUILD := strings.Join(pkgbuildLines, "\n")
+	
+	// Limit comments to prevent prompt bloat (max 3 comments, 100 chars each)
+	limitedComments := pkgInfo.Comments
+	if len(limitedComments) > 3 {
+		limitedComments = limitedComments[:3]
+	}
+	var shortComments []string
+	for _, comment := range limitedComments {
+		if len(comment) > 100 {
+			comment = comment[:97] + "..."
+		}
+		shortComments = append(shortComments, comment)
+	}
+	
+	// Build dependency strings
+	depends := strings.Join(pkgInfo.Dependencies, ", ")
+	makeDepends := strings.Join(pkgInfo.MakeDepends, ", ")
+	if len(depends) > 200 {
+		depends = depends[:197] + "..."
+	}
+	if len(makeDepends) > 200 {
+		makeDepends = makeDepends[:197] + "..."
+	}
+	return fmt.Sprintf(`You are a security expert conducting a systematic analysis of PKGBUILD files from the Arch User Repository (AUR). 
 
-Please analyze the following PKGBUILD file and provide a JSON response with your security assessment:
+Your task is to perform a comprehensive security entropy analysis following this structured template:
 
+=== PACKAGE INFORMATION ===
 Package: %s
 Version: %s
 Description: %s
 Maintainer: %s
+AUR Page: %s
 
-PKGBUILD Content:
+=== AUR CONTEXT ===
+Last Updated: %s
+First Submitted: %s
+Votes: %d
+Popularity: %.3f
+Dependencies: %s
+Make Dependencies: %s
+AUR Comments/Warnings: %s
+
+=== PKGBUILD CONTENT ===
 %s
 
-Please respond ONLY with a JSON object in this exact format:
+=== ANALYSIS FRAMEWORK ===
+
+You must systematically evaluate each of these security dimensions and provide specific findings:
+
+1. **SOURCE ANALYSIS** - Examine source array and origins:
+   - Official sources vs third-party/unknown sources
+   - Multiple source origins (increases entropy)
+   - Source URL patterns (GitHub official vs random repos)
+   - Version consistency and authenticity
+
+2. **BUILD PROCESS ANALYSIS** - Examine build() and package() functions:
+   - Source compilation vs simple repackaging  
+   - Custom build scripts and patches
+   - Network requests during build (wget, curl, git clone)
+   - System modifications during build
+
+3. **FILE OPERATIONS ANALYSIS** - Examine file handling:
+   - Files installed outside $pkgdir
+   - Setuid/setgid files creation
+   - System configuration modifications
+   - Unusual file permissions
+
+4. **CODE EXECUTION ANALYSIS** - Examine dynamic code:
+   - eval, exec with dynamic content
+   - Base64/hex encoded commands
+   - Downloaded scripts being executed
+   - Shell obfuscation patterns
+
+5. **DEPENDENCY ANALYSIS** - Examine dependencies:
+   - Unusual or suspicious dependencies
+   - -git or -bin variant dependencies
+   - Dependency confusion risks
+
+6. **MAINTAINER TRUST ANALYSIS** - Evaluate maintainer context:
+   - New vs established maintainer
+   - Package update patterns
+   - Maintainer reputation indicators
+
+For each finding, provide:
+- **Type**: Category of finding (source_analysis, build_process, file_operations, etc.)
+- **Entropy Level**: MINIMAL/LOW/MODERATE/HIGH/CRITICAL
+- **Description**: What specifically was found
+- **Context**: Relevant code snippet or detail
+- **Entropy Notes**: Why this increases/decreases predictability and risk
+- **Suggestion**: How to mitigate or verify this finding
+
+Respond ONLY with a JSON object in this exact format:
 {
   "overall_entropy": "MINIMAL|LOW|MODERATE|HIGH|CRITICAL",
   "overall_level": "MINIMAL|LOW|MODERATE|HIGH|CRITICAL",
   "findings": [
     {
-      "type": "finding_type",
+      "type": "source_analysis|build_process|file_operations|code_execution|dependency_analysis|maintainer_trust",
       "entropy": "MINIMAL|LOW|MODERATE|HIGH|CRITICAL",
       "severity": "MINIMAL|LOW|MODERATE|HIGH|CRITICAL", 
-      "description": "detailed description",
+      "description": "detailed description of what was found",
       "line_number": 0,
       "context": "relevant code snippet",
-      "suggestion": "how to fix or mitigate",
-      "entropy_notes": "why this increases unpredictability/risk"
+      "suggestion": "specific mitigation or verification steps",
+      "entropy_notes": "educational explanation of why this affects security predictability"
     }
   ],
-  "summary": "brief overall assessment",
+  "summary": "comprehensive assessment with educational context",
   "recommendation": "PROCEED|REVIEW|BLOCK",
-  "entropy_factors": ["list", "of", "what", "increases", "uncertainty"],
-  "predictability_score": 0.5
+  "entropy_factors": ["specific", "factors", "that", "increase", "uncertainty"],
+  "predictability_score": 0.5,
+  "educational_summary": "What users should learn from this analysis - explain key security concepts, red flags to watch for, and general PKGBUILD security principles demonstrated in this package",
+  "security_lessons": ["Key lesson 1", "Key lesson 2", "Key lesson 3"]
 }
 
 CRITICAL SECURITY ENTROPY ANALYSIS:
@@ -188,12 +281,29 @@ Think of "entropy" as unpredictability and uncertainty - the more unknowns and v
 - Runtime code generation
 - Dependency confusion risks
 
-Focus on UNPREDICTABILITY and UNCERTAINTY as security entropy indicators. The more variables and unknowns, the higher the entropy.`, 
+Focus on UNPREDICTABILITY and UNCERTAINTY as security entropy indicators. The more variables and unknowns, the higher the entropy.
+
+**AUR CONTEXT ANALYSIS GUIDELINES:**
+- Recent updates indicate active maintenance (good) vs abandonment (concerning)
+- High vote counts and popularity suggest community trust
+- Comments may reveal security concerns, build issues, or user experiences
+- Long-established packages (older first submitted dates) tend to be more stable
+- Rapid update frequency could indicate instability or active development
+- Dependencies can reveal complexity and attack surface
+- Make dependencies show build-time requirements and potential risks`, 
 		pkgInfo.Name, 
 		pkgInfo.Version,
 		pkgInfo.Description,
 		pkgInfo.Maintainer,
-		pkgInfo.PKGBUILD)
+		pkgInfo.AURPageURL,
+		pkgInfo.LastUpdated,
+		pkgInfo.FirstSubmitted,
+		pkgInfo.Votes,
+		pkgInfo.Popularity,
+		depends,
+		makeDepends,
+		strings.Join(shortComments, " | "),
+		truncatedPKGBUILD)
 }
 
 // parseAnalysisResponse parses Claude's JSON response
@@ -203,7 +313,12 @@ func (c *ClaudeProvider) parseAnalysisResponse(response string, pkgInfo types.Pa
 	jsonEnd := strings.LastIndex(response, "}")
 	
 	if jsonStart == -1 || jsonEnd == -1 {
-		return nil, fmt.Errorf("no JSON found in response")
+		// Debug: show part of response to understand the issue
+		responsePreview := response
+		if len(responsePreview) > 500 {
+			responsePreview = responsePreview[:500] + "..."
+		}
+		return nil, fmt.Errorf("no JSON found in response. Preview: %s", responsePreview)
 	}
 	
 	jsonStr := response[jsonStart : jsonEnd+1]
@@ -213,6 +328,8 @@ func (c *ClaudeProvider) parseAnalysisResponse(response string, pkgInfo types.Pa
 		OverallLevel        string   `json:"overall_level"`
 		EntropyFactors      []string `json:"entropy_factors"`
 		PredictabilityScore float64  `json:"predictability_score"`
+		EducationalSummary  string   `json:"educational_summary"`
+		SecurityLessons     []string `json:"security_lessons"`
 		Findings            []struct {
 			Type         string `json:"type"`
 			Entropy      string `json:"entropy"`
@@ -248,6 +365,8 @@ func (c *ClaudeProvider) parseAnalysisResponse(response string, pkgInfo types.Pa
 		Provider:            "claude",
 		EntropyFactors:      analysisData.EntropyFactors,
 		PredictabilityScore: analysisData.PredictabilityScore,
+		EducationalSummary:  analysisData.EducationalSummary,
+		SecurityLessons:     analysisData.SecurityLessons,
 	}
 	
 	for _, finding := range analysisData.Findings {

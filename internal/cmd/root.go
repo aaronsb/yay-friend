@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
+	"github.com/aaronsb/yay-friend/internal/aur"
 	"github.com/aaronsb/yay-friend/internal/config"
 	"github.com/aaronsb/yay-friend/internal/providers"
 	"github.com/aaronsb/yay-friend/internal/types"
@@ -103,6 +105,10 @@ func runInstall(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
+	
+	// Debug config loading - temporarily show for troubleshooting
+	fmt.Printf("🔧 Config Debug - Default Provider: %s, Block Level: %d, Warn Level: %d\n", 
+		cfg.DefaultProvider, int(cfg.SecurityThresholds.BlockLevel), int(cfg.SecurityThresholds.WarnLevel))
 
 	// Parse yay command
 	operation, err := yay.ParseYayCommand(args)
@@ -209,7 +215,17 @@ func analyzeAndDecide(ctx context.Context, yayClient *yay.YayClient, provider ty
 		return err
 	}
 
-	// Analyze security
+	// Fetch additional AUR context
+	fmt.Printf("🌐 Fetching AUR page context...\n")
+	aurFetcher := aur.NewAURFetcher()
+	if err := aurFetcher.EnrichPackageInfo(ctx, pkgInfo); err != nil {
+		fmt.Printf("⚠️  Warning: Could not enrich with AUR context: %v\n", err)
+	} else {
+		fmt.Printf("✅ AUR context: %d votes, %.3f popularity, %d comments\n", 
+			pkgInfo.Votes, pkgInfo.Popularity, len(pkgInfo.Comments))
+	}
+
+	// Analyze security with enriched context
 	analysis, err := provider.AnalyzePKGBUILD(ctx, *pkgInfo)
 	if err != nil {
 		return err
@@ -221,30 +237,82 @@ func analyzeAndDecide(ctx context.Context, yayClient *yay.YayClient, provider ty
 
 // handleAnalysisResult processes the analysis result and makes a decision
 func handleAnalysisResult(analysis *types.SecurityAnalysis, cfg *types.Config) error {
-	// Display analysis summary
-	fmt.Printf("\n📋 Security Analysis for %s:\n", analysis.PackageName)
-	fmt.Printf("Overall Level: %s\n", analysis.OverallLevel.String())
-	fmt.Printf("Summary: %s\n", analysis.Summary)
+	// Display analysis summary with better formatting
+	fmt.Printf("\n" + strings.Repeat("=", 60) + "\n")
+	fmt.Printf("📋 Security Analysis Results: %s\n", analysis.PackageName)
+	fmt.Printf(strings.Repeat("=", 60) + "\n")
+	
+	// Display entropy level with color coding
+	entropyIcon := getEntropyIcon(analysis.OverallLevel)
+	fmt.Printf("🔒 Security Entropy: %s %s\n", entropyIcon, analysis.OverallLevel.String())
+	
+	if analysis.PredictabilityScore > 0 {
+		fmt.Printf("📊 Predictability Score: %.2f/1.0\n", analysis.PredictabilityScore)
+	}
+	
+	if len(analysis.EntropyFactors) > 0 {
+		fmt.Printf("⚡ Entropy Factors: %s\n", strings.Join(analysis.EntropyFactors, ", "))
+	}
+	
+	fmt.Printf("📝 Summary: %s\n", analysis.Summary)
+	
+	// Show educational content
+	if analysis.EducationalSummary != "" {
+		fmt.Printf("\n🎓 Security Education:\n")
+		fmt.Printf(strings.Repeat("-", 60) + "\n")
+		fmt.Printf("%s\n", analysis.EducationalSummary)
+	}
+
+	if len(analysis.SecurityLessons) > 0 {
+		fmt.Printf("\n💡 Key Security Lessons:\n")
+		for i, lesson := range analysis.SecurityLessons {
+			fmt.Printf("   %d. %s\n", i+1, lesson)
+		}
+	}
+
+	// Debug threshold comparison - always show for debugging this issue
+	fmt.Printf("\n🔧 Debug - Analysis Level: %d (%s), Block Threshold: %d (%s), Warn Threshold: %d (%s)\n", 
+		int(analysis.OverallLevel), analysis.OverallLevel.String(),
+		int(cfg.SecurityThresholds.BlockLevel), cfg.SecurityThresholds.BlockLevel.String(),
+		int(cfg.SecurityThresholds.WarnLevel), cfg.SecurityThresholds.WarnLevel.String())
 
 	// Check against thresholds
 	if analysis.OverallLevel >= cfg.SecurityThresholds.BlockLevel {
-		fmt.Printf("🚫 Package blocked due to security level: %s\n", analysis.OverallLevel.String())
+		fmt.Printf("\n🚫 BLOCKED: Package security level (%s) exceeds block threshold (%s)\n", 
+			analysis.OverallLevel.String(), cfg.SecurityThresholds.BlockLevel.String())
 		return fmt.Errorf("package %s blocked by security policy", analysis.PackageName)
 	}
 
-	if analysis.OverallLevel >= cfg.SecurityThresholds.WarnLevel {
-		fmt.Printf("⚠️  Warning: Security issues detected (%s)\n", analysis.OverallLevel.String())
-		
-		// Show findings if present
-		if len(analysis.Findings) > 0 {
-			fmt.Println("\nFindings:")
-			for i, finding := range analysis.Findings {
-				fmt.Printf("  %d. [%s] %s\n", i+1, finding.Severity.String(), finding.Description)
-				if finding.Suggestion != "" {
-					fmt.Printf("     Suggestion: %s\n", finding.Suggestion)
-				}
+	// Show detailed findings
+	if len(analysis.Findings) > 0 {
+		fmt.Printf("\n🔍 Detailed Security Analysis:\n")
+		fmt.Printf(strings.Repeat("-", 60) + "\n")
+		for i, finding := range analysis.Findings {
+			icon := getEntropyIcon(finding.Entropy)
+			fmt.Printf("%d. %s [%s] %s\n", i+1, icon, finding.Entropy.String(), finding.Type)
+			fmt.Printf("   📄 %s\n", finding.Description)
+			
+			if finding.Context != "" {
+				fmt.Printf("   📋 Context: %s\n", finding.Context)
 			}
+			
+			if finding.EntropyNotes != "" {
+				fmt.Printf("   🧠 Entropy Analysis: %s\n", finding.EntropyNotes)
+			}
+			
+			if finding.Suggestion != "" {
+				fmt.Printf("   💡 Suggestion: %s\n", finding.Suggestion)
+			}
+			
+			if finding.LineNumber > 0 {
+				fmt.Printf("   📍 Line: %d\n", finding.LineNumber)
+			}
+			fmt.Println()
 		}
+	}
+
+	if analysis.OverallLevel >= cfg.SecurityThresholds.WarnLevel {
+		fmt.Printf("⚠️  WARNING: Security concerns detected (%s entropy level)\n", analysis.OverallLevel.String())
 
 		// Ask user for confirmation unless auto-proceed is enabled
 		if !cfg.SecurityThresholds.AutoProceed {
@@ -259,4 +327,22 @@ func handleAnalysisResult(analysis *types.SecurityAnalysis, cfg *types.Config) e
 
 	fmt.Printf("✅ %s approved for installation\n", analysis.PackageName)
 	return nil
+}
+
+// getEntropyIcon returns an icon based on entropy level
+func getEntropyIcon(level types.SecurityEntropy) string {
+	switch level {
+	case types.EntropyMinimal:
+		return "🟢"
+	case types.EntropyLow:
+		return "🟡"
+	case types.EntropyModerate:
+		return "🟠"
+	case types.EntropyHigh:
+		return "🔴"
+	case types.EntropyCritical:
+		return "🚨"
+	default:
+		return "❓"
+	}
 }
