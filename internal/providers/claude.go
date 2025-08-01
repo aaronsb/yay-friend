@@ -453,22 +453,51 @@ func parseSecurityLevel(level string) types.SecurityLevel {
 	return parseSecurityEntropy(level) // They're the same type now
 }
 
-// buildSimpleSecurityPrompt creates a much simpler prompt for testing
+// buildSimpleSecurityPrompt creates an enhanced but reliable prompt
 func (c *ClaudeProvider) buildSimpleSecurityPrompt(pkgInfo types.PackageInfo) string {
-	return fmt.Sprintf(`Analyze this PKGBUILD for security issues:
+	// Build dependency strings
+	depends := strings.Join(pkgInfo.Dependencies, ", ")
+	makeDepends := strings.Join(pkgInfo.MakeDepends, ", ")
+	if len(depends) > 200 {
+		depends = depends[:197] + "..."
+	}
+	if len(makeDepends) > 200 {
+		makeDepends = makeDepends[:197] + "..."
+	}
 
-Package: %s
-Version: %s
-Maintainer: %s
+	return fmt.Sprintf(`Analyze this PKGBUILD for security entropy (unpredictability/risk factors):
+
+PACKAGE INFO:
+Name: %s | Version: %s | Maintainer: %s
+Votes: %d | Popularity: %.3f | First: %s | Updated: %s
+Dependencies: %s | Build Deps: %s
 
 PKGBUILD:
 %s
 
-Provide a brief JSON response with:
-- overall_entropy: MINIMAL/LOW/MODERATE/HIGH/CRITICAL
-- summary: Brief security assessment
-- recommendation: PROCEED/REVIEW/BLOCK
+Provide detailed JSON analysis with:
+{
+  "overall_entropy": "MINIMAL|LOW|MODERATE|HIGH|CRITICAL",
+  "summary": "comprehensive security assessment with key concerns",
+  "recommendation": "PROCEED|REVIEW|BLOCK",
+  "findings": [
+    {
+      "type": "source_analysis|build_process|file_operations|maintainer_trust|dependency_analysis",
+      "entropy": "MINIMAL|LOW|MODERATE|HIGH|CRITICAL", 
+      "description": "what was found",
+      "context": "relevant code snippet",
+      "suggestion": "specific action to take",
+      "line_number": 0
+    }
+  ],
+  "entropy_factors": ["factor1", "factor2"],
+  "educational_summary": "what users should learn from this analysis",
+  "security_lessons": ["lesson1", "lesson2", "lesson3"]
+}
 
-Response:`, 
-		pkgInfo.Name, pkgInfo.Version, pkgInfo.Maintainer, pkgInfo.PKGBUILD)
+Focus on: source compilation vs repackaging, multiple sources, network requests during build, code obfuscation, maintainer trust, dependency risks.`, 
+		pkgInfo.Name, pkgInfo.Version, pkgInfo.Maintainer,
+		pkgInfo.Votes, pkgInfo.Popularity,
+		pkgInfo.FirstSubmitted, pkgInfo.LastUpdated,
+		depends, makeDepends, pkgInfo.PKGBUILD)
 }
