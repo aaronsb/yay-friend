@@ -50,23 +50,62 @@ func (c *ClaudeProvider) IsAuthenticated() bool {
 
 // AnalyzePKGBUILD analyzes a PKGBUILD using Claude Code
 func (c *ClaudeProvider) AnalyzePKGBUILD(ctx context.Context, pkgInfo types.PackageInfo) (*types.SecurityAnalysis, error) {
+	return c.AnalyzePKGBUILDWithOptions(ctx, pkgInfo, false)
+}
+
+// AnalyzePKGBUILDWithOptions analyzes a PKGBUILD with additional options
+func (c *ClaudeProvider) AnalyzePKGBUILDWithOptions(ctx context.Context, pkgInfo types.PackageInfo, noSpinner bool) (*types.SecurityAnalysis, error) {
 	if !c.authenticated {
 		return nil, fmt.Errorf("claude provider not authenticated")
 	}
 
-	prompt := c.buildSecurityPrompt(pkgInfo)
+	prompt := c.buildSimpleSecurityPrompt(pkgInfo)
 	
-	fmt.Printf("🤖 Analyzing with Claude...\n")
+	var output []byte
+	var err error
 	
-	// Run claude with the prompt via stdin (simple approach)
-	cmd := exec.CommandContext(ctx, "claude")
-	cmd.Stdin = strings.NewReader(prompt)
-	output, err := cmd.Output()
+	if noSpinner {
+		fmt.Printf("Analyzing with Claude...\n")
+		// No spinner - just run claude directly
+		cmd := exec.CommandContext(ctx, "claude")
+		cmd.Stdin = strings.NewReader(prompt)
+		output, err = cmd.Output()
+		fmt.Printf("Analysis complete.\n")
+	} else {
+		fmt.Printf("Analyzing with Claude... ")
+		
+		// Start spinner in a goroutine
+		done := make(chan bool)
+		go func() {
+			spinner := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+			i := 0
+			for {
+				select {
+				case <-done:
+					fmt.Printf("\r")
+					return
+				default:
+					fmt.Printf("\rAnalyzing with Claude... %s", spinner[i%len(spinner)])
+					i++
+					time.Sleep(100 * time.Millisecond)
+				}
+			}
+		}()
+		
+		// Run claude with the prompt via stdin
+		cmd := exec.CommandContext(ctx, "claude")
+		cmd.Stdin = strings.NewReader(prompt)
+		output, err = cmd.Output()
+		
+		// Stop spinner and clear line  
+		done <- true
+		time.Sleep(10 * time.Millisecond) // Give spinner time to clear
+		fmt.Printf("\rAnalyzing with Claude... Complete!\n")
+	}
+	
 	if err != nil {
 		return nil, fmt.Errorf("claude analysis failed: %w", err)
 	}
-	
-	fmt.Printf("🔄 Processing analysis results...\n")
 
 	// Parse the response
 	analysis, err := c.parseAnalysisResponse(string(output), pkgInfo)
@@ -412,4 +451,24 @@ func parseSecurityEntropy(level string) types.SecurityEntropy {
 // parseSecurityLevel converts string to SecurityLevel (legacy compatibility)
 func parseSecurityLevel(level string) types.SecurityLevel {
 	return parseSecurityEntropy(level) // They're the same type now
+}
+
+// buildSimpleSecurityPrompt creates a much simpler prompt for testing
+func (c *ClaudeProvider) buildSimpleSecurityPrompt(pkgInfo types.PackageInfo) string {
+	return fmt.Sprintf(`Analyze this PKGBUILD for security issues:
+
+Package: %s
+Version: %s
+Maintainer: %s
+
+PKGBUILD:
+%s
+
+Provide a brief JSON response with:
+- overall_entropy: MINIMAL/LOW/MODERATE/HIGH/CRITICAL
+- summary: Brief security assessment
+- recommendation: PROCEED/REVIEW/BLOCK
+
+Response:`, 
+		pkgInfo.Name, pkgInfo.Version, pkgInfo.Maintainer, pkgInfo.PKGBUILD)
 }

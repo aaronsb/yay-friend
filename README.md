@@ -79,6 +79,69 @@ yay-friend config show
 yay-friend --skip-analysis -S package-name
 ```
 
+## 🔍 Example Analysis Output
+
+Here's what a real analysis looks like - notice the **transparency** about what data we collect:
+
+```
+🔍 Analyzing hello with claude...
+
+Collected for Analysis:
+─────────────────────────
+• PKGBUILD: 28 lines of shell script
+• Package metadata: hello v2.12.1 by Matthew Sexton <mssxtn@gmail.com
+
+Analyzing with Claude...
+Analysis complete.
+
+============================================================
+Security Analysis for hello
+============================================================
+Provider: claude
+Analyzed: 2025-07-31 20:26:15
+Overall Level: LOW
+
+Summary:
+This PKGBUILD represents a low-risk package for the official GNU Hello World program. The primary entropy factors are source compilation (standard for GNU software) and weak MD5 checksums. The package follows standard practices with official sources and clean build processes, though low community engagement raises minor maintenance concerns.
+
+Recommendation: PROCEED
+
+Detailed Findings:
+----------------------------------------
+1. [MINIMAL] source_analysis
+   Single source from official GNU FTP server for well-established GNU Hello World program
+   Line: 11
+   Context: source=(https://ftp.gnu.org/gnu/hello/$pkgname-$pkgver.tar.gz)
+   💡 Source is trustworthy - official GNU software repository. Consider upgrading to SHA256 checksums instead of MD5 for better integrity verification.
+
+2. [LOW] source_analysis
+   Uses MD5 checksums instead of stronger SHA256 for integrity verification
+   Line: 12
+   Context: md5sums=('5cf598783b9541527e17c9b5e525b7eb')
+   💡 Upgrade to SHA256 checksums for better cryptographic security: sha256sums=('hash')
+
+3. [LOW] build_process
+   Source compilation using standard autotools build process instead of simple repackaging
+   Line: 15
+   Context: ./configure --prefix=/usr
+make
+   💡 Build process is standard for GNU software. No additional verification needed - autotools is well-established and secure.
+
+4. [MINIMAL] file_operations
+   Clean installation using standard make install with proper DESTDIR usage
+   Line: 19
+   Context: make DESTDIR="$pkgdir/" install
+   💡 File operations are properly contained within package directory. No concerns.
+
+5. [MODERATE] maintainer_trust
+   Multiple contributors over time but package has 0 votes and 0.000 popularity in AUR
+   Line: 3
+   Context: # Maintainer: Matthew Sexton <mssxtn@gmail.com
+#contributor: Michał Wojdyła < micwoj9292 at gmail dot com >
+#Contributor: leo <leotemplin@yahoo.de>
+   💡 Low community engagement despite being official GNU software suggests limited usage. Verify this is needed vs using official repository version.
+```
+
 ## 🔍 Security Analysis Criteria
 
 ### 🌪️ High Entropy Indicators (Suspicious)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/gookit/color"
 	"github.com/spf13/cobra"
 
 	"github.com/aaronsb/yay-friend/internal/config"
@@ -76,8 +77,19 @@ func runAnalyze(ctx context.Context, packageName string) error {
 		return fmt.Errorf("failed to get package info: %w", err)
 	}
 
-	// Analyze security
-	analysis, err := aiProvider.AnalyzePKGBUILD(ctx, *pkgInfo)
+	// Display what we collected for analysis
+	displayCollectedDataAnalyze(pkgInfo)
+
+	// Analyze security with options (support --no-spinner)
+	var analysis *types.SecurityAnalysis
+	
+	// Check if provider supports options (for Claude)
+	if claudeProvider, ok := aiProvider.(*providers.ClaudeProvider); ok {
+		analysis, err = claudeProvider.AnalyzePKGBUILDWithOptions(ctx, *pkgInfo, noSpinner)
+	} else {
+		analysis, err = aiProvider.AnalyzePKGBUILD(ctx, *pkgInfo)
+	}
+	
 	if err != nil {
 		return fmt.Errorf("analysis failed: %w", err)
 	}
@@ -129,4 +141,55 @@ func displayDetailedAnalysis(analysis *types.SecurityAnalysis) {
 func getColoredLevel(level types.SecurityLevel) string {
 	// For now, just return the string. We'll add colors when we implement the TUI
 	return level.String()
+}
+
+// displayCollectedDataAnalyze shows what information we gathered for analysis (analyze command version)
+func displayCollectedDataAnalyze(pkgInfo *types.PackageInfo) {
+	fmt.Printf("\n")
+	color.Bold.Printf("Collected for Analysis:\n")
+	fmt.Printf("─────────────────────────\n")
+	
+	// PKGBUILD stats
+	pkgbuildLines := len(strings.Split(pkgInfo.PKGBUILD, "\n"))
+	fmt.Printf("• PKGBUILD: %d lines of shell script\n", pkgbuildLines)
+	
+	// Package metadata
+	fmt.Printf("• Package metadata: %s v%s by %s\n", pkgInfo.Name, pkgInfo.Version, pkgInfo.Maintainer)
+	
+	// Dependencies
+	if len(pkgInfo.Dependencies) > 0 {
+		fmt.Printf("• Runtime dependencies: %d packages (%s)\n", 
+			len(pkgInfo.Dependencies), truncateListAnalyze(pkgInfo.Dependencies, 3))
+	}
+	if len(pkgInfo.MakeDepends) > 0 {
+		fmt.Printf("• Build dependencies: %d packages (%s)\n", 
+			len(pkgInfo.MakeDepends), truncateListAnalyze(pkgInfo.MakeDepends, 3))
+	}
+	
+	// AUR history
+	if pkgInfo.FirstSubmitted != "" && pkgInfo.LastUpdated != "" {
+		fmt.Printf("• AUR history: submitted %s, last updated %s\n", 
+			pkgInfo.FirstSubmitted, pkgInfo.LastUpdated)
+	}
+	
+	// Community engagement
+	if pkgInfo.Votes > 0 || pkgInfo.Popularity > 0 {
+		fmt.Printf("• Community: %d votes, %.3f popularity score\n", 
+			pkgInfo.Votes, pkgInfo.Popularity) 
+	}
+	
+	// Optional dependencies
+	if len(pkgInfo.OptDepends) > 0 {
+		fmt.Printf("• Optional dependencies: %d packages\n", len(pkgInfo.OptDepends))
+	}
+	
+	fmt.Printf("\n")
+}
+
+// truncateListAnalyze truncates a string slice for display (analyze command version)
+func truncateListAnalyze(items []string, maxItems int) string {
+	if len(items) <= maxItems {
+		return strings.Join(items, ", ")
+	}
+	return strings.Join(items[:maxItems], ", ") + fmt.Sprintf(" (+%d more)", len(items)-maxItems)
 }
