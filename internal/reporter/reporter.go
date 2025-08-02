@@ -1,13 +1,11 @@
 package reporter
 
 import (
-	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"

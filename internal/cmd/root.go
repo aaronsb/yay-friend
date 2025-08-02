@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/aaronsb/yay-friend/internal/aur"
+	"github.com/aaronsb/yay-friend/internal/cache"
 	"github.com/aaronsb/yay-friend/internal/config"
 	"github.com/aaronsb/yay-friend/internal/providers"
 	"github.com/aaronsb/yay-friend/internal/types"
@@ -89,6 +90,7 @@ func init() {
 
 	// Add subcommands
 	rootCmd.AddCommand(newAnalyzeCmd())
+	rootCmd.AddCommand(newCacheCmd())
 	rootCmd.AddCommand(newConfigCmd())
 	rootCmd.AddCommand(newProviderCmd())
 	rootCmd.AddCommand(newTestCmd())
@@ -232,7 +234,7 @@ func analyzeAndDecide(ctx context.Context, yayClient *yay.YayClient, provider ty
 		return err
 	}
 
-	// Fetch additional AUR context
+	// Fetch additional AUR context (including commit hash)
 	fmt.Printf("Fetching AUR context...\n")
 	aurFetcher := aur.NewAURFetcher()
 	if err := aurFetcher.EnrichPackageInfo(ctx, pkgInfo); err != nil {
@@ -242,21 +244,49 @@ func analyzeAndDecide(ctx context.Context, yayClient *yay.YayClient, provider ty
 			pkgInfo.Votes, pkgInfo.Popularity, len(pkgInfo.Comments))
 	}
 
-	// Display what we collected for analysis
-	displayCollectedData(pkgInfo)
-
-	// Analyze security with enriched context
-	var analysis *types.SecurityAnalysis
-	
-	// Check if provider supports options (for Claude)
-	if claudeProvider, ok := provider.(*providers.ClaudeProvider); ok {
-		analysis, err = claudeProvider.AnalyzePKGBUILDWithOptions(ctx, *pkgInfo, noSpinner)
-	} else {
-		analysis, err = provider.AnalyzePKGBUILD(ctx, *pkgInfo)
-	}
-	
+	// Initialize cache manager
+	cacheManager, err := cache.NewCacheManager()
 	if err != nil {
-		return err
+		fmt.Printf("Warning: Could not initialize cache: %v\n", err)
+		// Continue without caching
+	}
+
+	// Check cache first if enabled and we have commit hash and cache manager
+	var analysis *types.SecurityAnalysis
+	if cfg.Cache.Enabled && cacheManager != nil && pkgInfo.CommitHash != "" {
+		cachedAnalysis, cacheErr := cacheManager.GetCachedAnalysis(pkgInfo.Name, pkgInfo.CommitHash)
+		if cacheErr == nil {
+			fmt.Printf("📋 Using cached analysis (commit: %s)\n", pkgInfo.CommitHash[:8])
+			analysis = cachedAnalysis
+		} else {
+			fmt.Printf("🤖 Running fresh analysis (commit: %s)\n", pkgInfo.CommitHash[:8])
+			// Cache miss - continue to run AI analysis
+		}
+	}
+
+	// If no cached analysis found, run AI analysis
+	if analysis == nil {
+		// Display what we collected for analysis
+		displayCollectedData(pkgInfo)
+
+		// Analyze security with enriched context
+		// Check if provider supports options (for Claude)
+		if claudeProvider, ok := provider.(*providers.ClaudeProvider); ok {
+			analysis, err = claudeProvider.AnalyzePKGBUILDWithOptions(ctx, *pkgInfo, noSpinner)
+		} else {
+			analysis, err = provider.AnalyzePKGBUILD(ctx, *pkgInfo)
+		}
+		
+		if err != nil {
+			return err
+		}
+
+		// Save to cache if enabled and available
+		if cfg.Cache.Enabled && cacheManager != nil && pkgInfo.CommitHash != "" {
+			if cacheErr := cacheManager.SaveAnalysis(pkgInfo.Name, pkgInfo.CommitHash, analysis); cacheErr != nil {
+				fmt.Printf("Warning: Could not save analysis to cache: %v\n", cacheErr)
+			}
+		}
 	}
 
 	// Display results and make decision

@@ -47,6 +47,17 @@ func Load() (*types.Config, error) {
 			WarnLevel:   types.SecurityMedium,   // Warn on MODERATE and above
 			AutoProceed: false,
 		},
+		Cache: struct {
+			Enabled      bool `yaml:"enabled"`
+			MaxAgeDays   int  `yaml:"max_age_days"`
+			MaxSizeMB    int  `yaml:"max_size_mb"`
+			Compress     bool `yaml:"compress"`
+		}{
+			Enabled:      true,
+			MaxAgeDays:   90,
+			MaxSizeMB:    100,
+			Compress:     false,
+		},
 		UI: struct {
 			ShowDetails   bool `yaml:"show_details"`
 			UseColors     bool `yaml:"use_colors"`
@@ -100,6 +111,17 @@ func InitializeConfig() error {
 			BlockLevel:  types.SecurityCritical,
 			WarnLevel:   types.SecurityMedium,
 			AutoProceed: false,
+		},
+		Cache: struct {
+			Enabled      bool `yaml:"enabled"`
+			MaxAgeDays   int  `yaml:"max_age_days"`
+			MaxSizeMB    int  `yaml:"max_size_mb"`
+			Compress     bool `yaml:"compress"`
+		}{
+			Enabled:      true,
+			MaxAgeDays:   90,
+			MaxSizeMB:    100,
+			Compress:     false,
 		},
 		UI: struct {
 			ShowDetails   bool `yaml:"show_details"`
@@ -156,6 +178,11 @@ func setDefaults() {
 	viper.SetDefault("security_thresholds.block_level", int(types.SecurityCritical))
 	viper.SetDefault("security_thresholds.warn_level", int(types.SecurityMedium))
 	viper.SetDefault("security_thresholds.auto_proceed_safe", false)
+	
+	viper.SetDefault("cache.enabled", true)
+	viper.SetDefault("cache.max_age_days", 90)
+	viper.SetDefault("cache.max_size_mb", 100)
+	viper.SetDefault("cache.compress", false)
 	
 	viper.SetDefault("ui.show_details", true)
 	viper.SetDefault("ui.use_colors", true)

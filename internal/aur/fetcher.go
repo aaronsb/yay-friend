@@ -61,11 +61,21 @@ func (f *AURFetcher) EnrichPackageInfo(ctx context.Context, pkgInfo *types.Packa
 	// Build AUR package page URL for reference
 	pkgInfo.AURPageURL = fmt.Sprintf("https://aur.archlinux.org/packages/%s", pkgInfo.Name)
 	
-	// Fetch AUR metadata using RPC API
+	// Try to fetch git commit hash for AUR packages
+	commitHash, err := GetLatestCommitHash(ctx, pkgInfo.Name)
+	if err != nil {
+		// This is likely not an AUR package (could be from official repos)
+		// Set a fallback hash based on package name and version for basic caching
+		pkgInfo.CommitHash = fmt.Sprintf("fallback-%s-%s", pkgInfo.Name, pkgInfo.Version)
+	} else {
+		pkgInfo.CommitHash = commitHash
+	}
+	
+	// Fetch AUR metadata using RPC API (only for AUR packages)
 	aurData, err := f.fetchAURMetadata(ctx, pkgInfo.Name)
 	if err != nil {
-		// Don't fail the whole analysis if AUR API fetch fails
-		fmt.Printf("⚠️  Warning: Could not fetch AUR metadata: %v\n", err)
+		// This is likely not an AUR package (could be from official repos)
+		// Don't show warning for official packages, just skip AUR enrichment
 		return nil
 	}
 	

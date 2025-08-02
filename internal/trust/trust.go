@@ -1,7 +1,6 @@
 package trust
 
 import (
-	"encoding/json"
 	"fmt"
 	"os/exec"
 	"regexp"

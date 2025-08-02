@@ -93,6 +93,7 @@ type PackageInfo struct {
 	URL         string `json:"url"`
 	Maintainer  string `json:"maintainer"`
 	PKGBUILD    string `json:"pkgbuild"`
+	CommitHash  string `json:"commit_hash"` // AUR git commit hash for caching
 	// AUR page context
 	AURPageURL       string   `json:"aur_page_url,omitempty"`
 	LastUpdated      string   `json:"last_updated,omitempty"`
@@ -131,6 +132,12 @@ type Config struct {
 		WarnLevel     SecurityLevel `yaml:"warn_level"`
 		AutoProceed   bool          `yaml:"auto_proceed_safe"`
 	} `yaml:"security_thresholds"`
+	Cache struct {
+		Enabled      bool `yaml:"enabled"`
+		MaxAgeDays   int  `yaml:"max_age_days"`
+		MaxSizeMB    int  `yaml:"max_size_mb"`
+		Compress     bool `yaml:"compress"`
+	} `yaml:"cache"`
 	UI struct {
 		ShowDetails   bool `yaml:"show_details"`
 		UseColors     bool `yaml:"use_colors"`
