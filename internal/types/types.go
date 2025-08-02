@@ -138,6 +138,9 @@ type Config struct {
 		MaxSizeMB    int  `yaml:"max_size_mb"`
 		Compress     bool `yaml:"compress"`
 	} `yaml:"cache"`
+	Prompts struct {
+		SecurityAnalysis string `yaml:"security_analysis"`
+	} `yaml:"prompts"`
 	UI struct {
 		ShowDetails   bool `yaml:"show_details"`
 		UseColors     bool `yaml:"use_colors"`

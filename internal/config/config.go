@@ -58,6 +58,11 @@ func Load() (*types.Config, error) {
 			MaxSizeMB:    100,
 			Compress:     false,
 		},
+		Prompts: struct {
+			SecurityAnalysis string `yaml:"security_analysis"`
+		}{
+			SecurityAnalysis: getDefaultSecurityPrompt(),
+		},
 		UI: struct {
 			ShowDetails   bool `yaml:"show_details"`
 			UseColors     bool `yaml:"use_colors"`
@@ -123,6 +128,11 @@ func InitializeConfig() error {
 			MaxSizeMB:    100,
 			Compress:     false,
 		},
+		Prompts: struct {
+			SecurityAnalysis string `yaml:"security_analysis"`
+		}{
+			SecurityAnalysis: getDefaultSecurityPrompt(),
+		},
 		UI: struct {
 			ShowDetails   bool `yaml:"show_details"`
 			UseColors     bool `yaml:"use_colors"`
@@ -184,6 +194,8 @@ func setDefaults() {
 	viper.SetDefault("cache.max_size_mb", 100)
 	viper.SetDefault("cache.compress", false)
 	
+	viper.SetDefault("prompts.security_analysis", getDefaultSecurityPrompt())
+	
 	viper.SetDefault("ui.show_details", true)
 	viper.SetDefault("ui.use_colors", true)
 	viper.SetDefault("ui.verbose_output", false)
@@ -216,4 +228,39 @@ func validateConfig(cfg *types.Config) error {
 	}
 
 	return nil
+}
+
+// getDefaultSecurityPrompt returns the default security analysis prompt template
+func getDefaultSecurityPrompt() string {
+	return `Analyze this PKGBUILD for security entropy (unpredictability/risk factors):
+
+PACKAGE INFO:
+Name: {NAME} | Version: {VERSION} | Maintainer: {MAINTAINER}
+Votes: {VOTES} | Popularity: {POPULARITY} | First: {FIRST_SUBMITTED} | Updated: {LAST_UPDATED}
+Dependencies: {DEPENDENCIES} | Build Deps: {MAKE_DEPENDS}
+
+PKGBUILD:
+{PKGBUILD}
+
+Provide detailed JSON analysis with:
+{
+  "overall_entropy": "MINIMAL|LOW|MODERATE|HIGH|CRITICAL",
+  "summary": "comprehensive security assessment with key concerns",
+  "recommendation": "PROCEED|REVIEW|BLOCK",
+  "findings": [
+    {
+      "type": "source_analysis|build_process|file_operations|maintainer_trust|dependency_analysis",
+      "entropy": "MINIMAL|LOW|MODERATE|HIGH|CRITICAL", 
+      "description": "what was found",
+      "context": "relevant code snippet",
+      "suggestion": "specific action to take",
+      "line_number": 0
+    }
+  ],
+  "entropy_factors": ["factor1", "factor2"],
+  "educational_summary": "what users should learn from this analysis",
+  "security_lessons": ["lesson1", "lesson2", "lesson3"]
+}
+
+Focus on: source compilation vs repackaging, multiple sources, network requests during build, code obfuscation, maintainer trust, dependency risks.`
 }

@@ -109,6 +109,32 @@ The cache uses XDG Base Directory specification:
 - Cache location: `${XDG_DATA_HOME:-$HOME/.local/share}/yay-friend/cache/`
 - Each package gets its own directory with commit-hash based analysis files
 
+### Prompt Customization
+You can customize the AI analysis prompts by editing your configuration file. The prompts use template variables that get replaced with actual package information.
+
+```bash
+# Edit your configuration file
+$EDITOR ~/.config/yay-friend/config.yaml
+
+# Or reset to defaults by deleting the config (it will be recreated)
+rm ~/.config/yay-friend/config.yaml
+yay-friend config init
+```
+
+#### Available Template Variables
+- `{NAME}` - Package name
+- `{VERSION}` - Package version  
+- `{MAINTAINER}` - Package maintainer
+- `{VOTES}` - AUR vote count
+- `{POPULARITY}` - AUR popularity score
+- `{FIRST_SUBMITTED}` - When first submitted to AUR
+- `{LAST_UPDATED}` - When last updated in AUR
+- `{DEPENDENCIES}` - Runtime dependencies
+- `{MAKE_DEPENDS}` - Build dependencies
+- `{PKGBUILD}` - The actual PKGBUILD content
+
+The prompt template is stored in the `prompts.security_analysis` field in your config file.
+
 ## 🔍 Example Analysis Output
 
 Here's what a real analysis looks like - notice the **transparency** about what data we collect:

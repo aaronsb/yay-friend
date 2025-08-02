@@ -47,7 +47,9 @@ func runAnalyze(ctx context.Context, packageName string) error {
 
 	// Initialize providers
 	registry := providers.NewProviderRegistry()
-	registry.Register("claude", providers.NewClaudeProvider())
+	claudeProvider := providers.NewClaudeProvider()
+	claudeProvider.SetConfig(cfg)
+	registry.Register("claude", claudeProvider)
 	registry.Register("qwen", providers.NewQwenProvider())
 	registry.Register("copilot", providers.NewCopilotProvider())
 	registry.Register("goose", providers.NewGooseProvider())

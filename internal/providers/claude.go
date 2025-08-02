@@ -14,11 +14,17 @@ import (
 // ClaudeProvider implements the AIProvider interface for Claude Code
 type ClaudeProvider struct {
 	authenticated bool
+	config        *types.Config
 }
 
 // NewClaudeProvider creates a new Claude provider
 func NewClaudeProvider() *ClaudeProvider {
 	return &ClaudeProvider{}
+}
+
+// SetConfig sets the configuration for the provider
+func (c *ClaudeProvider) SetConfig(config *types.Config) {
+	c.config = config
 }
 
 // Name returns the provider name
@@ -453,7 +459,7 @@ func parseSecurityLevel(level string) types.SecurityLevel {
 	return parseSecurityEntropy(level) // They're the same type now
 }
 
-// buildSimpleSecurityPrompt creates an enhanced but reliable prompt
+// buildSimpleSecurityPrompt creates a prompt using the config template
 func (c *ClaudeProvider) buildSimpleSecurityPrompt(pkgInfo types.PackageInfo) string {
 	// Build dependency strings
 	depends := strings.Join(pkgInfo.Dependencies, ", ")
@@ -465,15 +471,40 @@ func (c *ClaudeProvider) buildSimpleSecurityPrompt(pkgInfo types.PackageInfo) st
 		makeDepends = makeDepends[:197] + "..."
 	}
 
-	return fmt.Sprintf(`Analyze this PKGBUILD for security entropy (unpredictability/risk factors):
+	// Get the prompt template from config, or use default if not available
+	template := c.getPromptTemplate()
+	
+	// Replace template variables
+	prompt := strings.ReplaceAll(template, "{NAME}", pkgInfo.Name)
+	prompt = strings.ReplaceAll(prompt, "{VERSION}", pkgInfo.Version)
+	prompt = strings.ReplaceAll(prompt, "{MAINTAINER}", pkgInfo.Maintainer)
+	prompt = strings.ReplaceAll(prompt, "{VOTES}", fmt.Sprintf("%d", pkgInfo.Votes))
+	prompt = strings.ReplaceAll(prompt, "{POPULARITY}", fmt.Sprintf("%.3f", pkgInfo.Popularity))
+	prompt = strings.ReplaceAll(prompt, "{FIRST_SUBMITTED}", pkgInfo.FirstSubmitted)
+	prompt = strings.ReplaceAll(prompt, "{LAST_UPDATED}", pkgInfo.LastUpdated)
+	prompt = strings.ReplaceAll(prompt, "{DEPENDENCIES}", depends)
+	prompt = strings.ReplaceAll(prompt, "{MAKE_DEPENDS}", makeDepends)
+	prompt = strings.ReplaceAll(prompt, "{PKGBUILD}", pkgInfo.PKGBUILD)
+	
+	return prompt
+}
+
+// getPromptTemplate returns the security analysis prompt template from config
+func (c *ClaudeProvider) getPromptTemplate() string {
+	if c.config != nil && c.config.Prompts.SecurityAnalysis != "" {
+		return c.config.Prompts.SecurityAnalysis
+	}
+	
+	// Fallback to hardcoded default if config is not available
+	return `Analyze this PKGBUILD for security entropy (unpredictability/risk factors):
 
 PACKAGE INFO:
-Name: %s | Version: %s | Maintainer: %s
-Votes: %d | Popularity: %.3f | First: %s | Updated: %s
-Dependencies: %s | Build Deps: %s
+Name: {NAME} | Version: {VERSION} | Maintainer: {MAINTAINER}
+Votes: {VOTES} | Popularity: {POPULARITY} | First: {FIRST_SUBMITTED} | Updated: {LAST_UPDATED}
+Dependencies: {DEPENDENCIES} | Build Deps: {MAKE_DEPENDS}
 
 PKGBUILD:
-%s
+{PKGBUILD}
 
 Provide detailed JSON analysis with:
 {
@@ -495,9 +526,5 @@ Provide detailed JSON analysis with:
   "security_lessons": ["lesson1", "lesson2", "lesson3"]
 }
 
-Focus on: source compilation vs repackaging, multiple sources, network requests during build, code obfuscation, maintainer trust, dependency risks.`, 
-		pkgInfo.Name, pkgInfo.Version, pkgInfo.Maintainer,
-		pkgInfo.Votes, pkgInfo.Popularity,
-		pkgInfo.FirstSubmitted, pkgInfo.LastUpdated,
-		depends, makeDepends, pkgInfo.PKGBUILD)
+Focus on: source compilation vs repackaging, multiple sources, network requests during build, code obfuscation, maintainer trust, dependency risks.`
 }

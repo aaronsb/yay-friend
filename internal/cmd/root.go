@@ -188,7 +188,9 @@ func runInstall(ctx context.Context, args []string) error {
 
 	// Initialize providers
 	registry := providers.NewProviderRegistry()
-	registry.Register("claude", providers.NewClaudeProvider())
+	claudeProvider := providers.NewClaudeProvider()
+	claudeProvider.SetConfig(cfg)
+	registry.Register("claude", claudeProvider)
 	registry.Register("qwen", providers.NewQwenProvider())
 	registry.Register("copilot", providers.NewCopilotProvider())
 	registry.Register("goose", providers.NewGooseProvider())
