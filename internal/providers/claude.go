@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 type ClaudeProvider struct {
 	authenticated bool
 	config        *types.Config
+	claudePath    string // Store the resolved path to claude command
 }
 
 // NewClaudeProvider creates a new Claude provider
@@ -32,17 +34,61 @@ func (c *ClaudeProvider) Name() string {
 	return "claude"
 }
 
+// findClaudeCommand searches for the claude command in various locations
+func (c *ClaudeProvider) findClaudeCommand() (string, error) {
+	// List of possible locations for the claude command
+	possiblePaths := []string{
+		"claude",                           // In PATH
+		"/usr/local/bin/claude",           // System-wide install
+		"/usr/bin/claude",                 // System package
+		"/home/" + os.Getenv("USER") + "/.claude/local/claude", // User-specific install
+		"/opt/claude/claude",              // Optional location
+	}
+	
+	// Also check XDG config directory
+	if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
+		possiblePaths = append(possiblePaths, xdgConfig+"/claude/claude")
+	}
+	
+	// Check HOME/.config as fallback
+	if home := os.Getenv("HOME"); home != "" {
+		possiblePaths = append(possiblePaths, home+"/.config/claude/claude")
+		possiblePaths = append(possiblePaths, home+"/.local/bin/claude")
+	}
+	
+	for _, path := range possiblePaths {
+		// For relative paths, use exec.LookPath
+		if !strings.Contains(path, "/") {
+			if resolvedPath, err := exec.LookPath(path); err == nil {
+				return resolvedPath, nil
+			}
+			continue
+		}
+		
+		// For absolute paths, check if file exists and is executable
+		if info, err := os.Stat(path); err == nil {
+			if info.Mode()&0111 != 0 { // Check if executable
+				return path, nil
+			}
+		}
+	}
+	
+	return "", fmt.Errorf("claude command not found in any expected location")
+}
+
 // Authenticate checks if Claude Code is available and authenticated
 func (c *ClaudeProvider) Authenticate(ctx context.Context) error {
-	// Check if claude command is available
-	if _, err := exec.LookPath("claude"); err != nil {
+	// Find the claude command
+	claudePath, err := c.findClaudeCommand()
+	if err != nil {
 		return fmt.Errorf("claude command not found: %w", err)
 	}
+	c.claudePath = claudePath
 
 	// Test authentication by running a simple command
-	cmd := exec.CommandContext(ctx, "claude", "--version")
+	cmd := exec.CommandContext(ctx, c.claudePath, "--version")
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to run claude command: %w", err)
+		return fmt.Errorf("failed to run claude command at %s: %w", c.claudePath, err)
 	}
 
 	c.authenticated = true
@@ -73,7 +119,7 @@ func (c *ClaudeProvider) AnalyzePKGBUILDWithOptions(ctx context.Context, pkgInfo
 	if noSpinner {
 		fmt.Printf("Analyzing with Claude...\n")
 		// No spinner - just run claude directly
-		cmd := exec.CommandContext(ctx, "claude")
+		cmd := exec.CommandContext(ctx, c.claudePath)
 		cmd.Stdin = strings.NewReader(prompt)
 		output, err = cmd.Output()
 		fmt.Printf("Analysis complete.\n")
@@ -99,7 +145,7 @@ func (c *ClaudeProvider) AnalyzePKGBUILDWithOptions(ctx context.Context, pkgInfo
 		}()
 		
 		// Run claude with the prompt via stdin
-		cmd := exec.CommandContext(ctx, "claude")
+		cmd := exec.CommandContext(ctx, c.claudePath)
 		cmd.Stdin = strings.NewReader(prompt)
 		output, err = cmd.Output()
 		
