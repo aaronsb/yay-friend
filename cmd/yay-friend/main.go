@@ -19,7 +19,7 @@ func main() {
 	if len(os.Args) > 1 {
 		firstArg := os.Args[1]
 		// Known subcommands that should use cobra
-		knownCommands := []string{"analyze", "config", "provider", "test", "help", "completion", "--help", "-h"}
+		knownCommands := []string{"analyze", "config", "provider", "cache", "version", "help", "completion", "--help", "-h", "--version"}
 		
 		isKnownCommand := false
 		for _, cmdName := range knownCommands {

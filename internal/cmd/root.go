@@ -93,6 +93,7 @@ func init() {
 	rootCmd.AddCommand(newCacheCmd())
 	rootCmd.AddCommand(newConfigCmd())
 	rootCmd.AddCommand(newProviderCmd())
+	rootCmd.AddCommand(newVersionCmd())
 }
 
 // initConfig reads in config file and ENV variables.

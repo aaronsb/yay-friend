@@ -104,8 +104,18 @@ build_from_source() {
     print_info "Cloning repository..."
     git clone "$REPO_URL" .
     
-    print_info "Building binary..."
-    go build -o "$BINARY_NAME" ./cmd/yay-friend
+    print_info "Building binary with version info..."
+    # Get version info
+    VERSION=${VERSION:-"0.1.0"}
+    GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    
+    # Build with version info
+    LDFLAGS="-X github.com/aaronsb/yay-friend/internal/version.Version=${VERSION}"
+    LDFLAGS="${LDFLAGS} -X github.com/aaronsb/yay-friend/internal/version.GitCommit=${GIT_COMMIT}"
+    LDFLAGS="${LDFLAGS} -X github.com/aaronsb/yay-friend/internal/version.BuildDate=${BUILD_DATE}"
+    
+    go build -ldflags "${LDFLAGS}" -o "$BINARY_NAME" ./cmd/yay-friend
     
     if [[ ! -f "$BINARY_NAME" ]]; then
         print_error "Failed to build binary"
@@ -130,11 +140,17 @@ install_binary() {
     
     print_info "Installing to $install_dir..."
     
+    # Check if binary already exists
+    if [[ -f "$install_dir/$BINARY_NAME" ]]; then
+        print_warning "Existing binary found at $install_dir/$BINARY_NAME"
+        print_info "Overwriting with new version..."
+    fi
+    
     if [[ "$needs_sudo" == "true" ]]; then
-        sudo cp "$BINARY_NAME" "$install_dir/"
+        sudo cp -f "$BINARY_NAME" "$install_dir/"
         sudo chmod +x "$install_dir/$BINARY_NAME"
     else
-        cp "$BINARY_NAME" "$install_dir/"
+        cp -f "$BINARY_NAME" "$install_dir/"
         chmod +x "$install_dir/$BINARY_NAME"
     fi
     
