@@ -11,10 +11,10 @@ A security-focused wrapper around `yay` that uses AI to analyze PKGBUILD files f
 **Entropy** = Unpredictability + Uncertainty = Potential Risk
 
 - **🟢 Minimal Entropy**: Predictable, simple repackaging from official sources
-- **🟡 Low Entropy**: Minor uncertainty, standard operations  
-- **🟠 Moderate Entropy**: Some concerning factors, needs review
+- **🟢 Low Entropy**: Minor uncertainty, standard operations  
+- **🟡 Moderate Entropy**: Some concerning factors, needs review
 - **🔴 High Entropy**: Multiple suspicious factors, high uncertainty
-- **⚫ Critical Entropy**: Maximum chaos - compilation + multiple sources + obfuscation
+- **🔴 Critical Entropy**: Maximum chaos - compilation + multiple sources + obfuscation (bold red)
 
 ## 🎬 Demo
 

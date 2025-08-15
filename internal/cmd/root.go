@@ -404,13 +404,13 @@ func getEntropyIcon(level types.SecurityEntropy) string {
 	case types.EntropyMinimal:
 		return "🟢"
 	case types.EntropyLow:
-		return "🟡"
+		return "🟢"
 	case types.EntropyModerate:
-		return "🟠"
+		return "🟡"
 	case types.EntropyHigh:
 		return "🔴"
 	case types.EntropyCritical:
-		return "🚨"
+		return "🔴"
 	default:
 		return "❓"
 	}
