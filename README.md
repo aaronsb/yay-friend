@@ -53,8 +53,8 @@ go build -o yay-friend ./cmd/yay-friend
 # Initialize configuration
 yay-friend config init
 
-# Test the analysis pipeline
-yay-friend test hello
+# Analyze a package without installing
+yay-friend analyze hello
 
 # Analyze a package (no installation)
 yay-friend analyze suspicious-package
@@ -274,11 +274,11 @@ providers:
 ## 🧪 Development & Testing
 
 ```bash
-# Test analysis pipeline
-yay-friend test hello
+# Analyze packages without installing
+yay-friend analyze hello
 
-# Test with a compilation package
-yay-friend test some-git-package
+# Analyze a compilation package
+yay-friend analyze some-git-package
 
 # Check provider authentication
 yay-friend provider test

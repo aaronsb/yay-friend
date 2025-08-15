@@ -93,7 +93,6 @@ func init() {
 	rootCmd.AddCommand(newCacheCmd())
 	rootCmd.AddCommand(newConfigCmd())
 	rootCmd.AddCommand(newProviderCmd())
-	rootCmd.AddCommand(newTestCmd())
 }
 
 // initConfig reads in config file and ENV variables.
@@ -420,11 +419,11 @@ func getEntropyIcon(level types.SecurityEntropy) string {
 func getEntropyColor(level types.SecurityEntropy) color.Style {
 	switch level {
 	case types.EntropyMinimal:
-		return color.New(color.FgGreen)
+		return color.New(color.FgGreen, color.OpBold)
 	case types.EntropyLow:
-		return color.New(color.FgYellow)
+		return color.New(color.FgGreen)
 	case types.EntropyModerate:
-		return color.New(color.FgLightYellow) // Orange-like color
+		return color.New(color.FgYellow) // Yellow/orange color
 	case types.EntropyHigh:
 		return color.New(color.FgRed)
 	case types.EntropyCritical:
