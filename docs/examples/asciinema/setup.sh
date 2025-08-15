@@ -55,7 +55,7 @@ clear
 echo -e "${GREEN}✓ Environment ready for recording${NC}"
 echo ""
 echo "To start recording, run:"
-echo "  asciinema rec --title 'yay-friend Demo' demo.cast"
+echo "  asciinema rec --title 'yay-friend Demo' --cols 120 --rows 30 demo.cast"
 echo ""
 echo "Then run the demo script:"
 echo "  ./demo.sh"

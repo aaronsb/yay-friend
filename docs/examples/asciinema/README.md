@@ -28,12 +28,16 @@ This will:
 Start an asciinema recording session:
 
 ```bash
+# For asciinema v2 (recommended for GIF conversion):
+asciinema rec --title "yay-friend Demo" --cols 120 --rows 30 demo.cast
+
+# For asciinema v3:
 asciinema rec --title "yay-friend Demo" demo.cast
 ```
 
 Options:
-- Add `--cols 120 --rows 30` to force terminal size
 - Add `--idle-time-limit 2` to auto-trim long pauses
+- Use `--cols 120 --rows 30` to force terminal size (v2)
 
 ### 3. Run Demo
 

@@ -16,6 +16,10 @@ A security-focused wrapper around `yay` that uses AI to analyze PKGBUILD files f
 - **🔴 High Entropy**: Multiple suspicious factors, high uncertainty
 - **⚫ Critical Entropy**: Maximum chaos - compilation + multiple sources + obfuscation
 
+## 🎬 Demo
+
+![yay-friend Demo](docs/examples/asciinema/demo.gif)
+
 ## ✨ Features
 
 - 🌪️ **Security Entropy Analysis** - Multi-factor risk assessment using AI
