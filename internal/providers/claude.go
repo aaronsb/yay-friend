@@ -113,6 +113,9 @@ func (c *ClaudeProvider) AnalyzePKGBUILDWithOptions(ctx context.Context, pkgInfo
 
 	prompt := c.buildSimpleSecurityPrompt(pkgInfo)
 	
+	// Debug: Write the full prompt to see what's being sent
+	os.WriteFile("/tmp/claude-final-prompt.txt", []byte(prompt), 0644)
+	
 	var output []byte
 	var err error
 	
@@ -532,6 +535,24 @@ func (c *ClaudeProvider) buildSimpleSecurityPrompt(pkgInfo types.PackageInfo) st
 	prompt = strings.ReplaceAll(prompt, "{MAKE_DEPENDS}", makeDepends)
 	prompt = strings.ReplaceAll(prompt, "{PKGBUILD}", pkgInfo.PKGBUILD)
 	
+	// Always replace install script placeholder
+	if pkgInfo.InstallScript != "" {
+		prompt = strings.ReplaceAll(prompt, "{INSTALL_SCRIPT}", pkgInfo.InstallScript)
+	} else {
+		prompt = strings.ReplaceAll(prompt, "{INSTALL_SCRIPT}", "[No install script present - this may be due to local PKGBUILD analysis limitations]")
+	}
+	
+	// Always replace additional files placeholder
+	if pkgInfo.AdditionalFiles != nil && len(pkgInfo.AdditionalFiles) > 0 {
+		var filesContent []string
+		for name, content := range pkgInfo.AdditionalFiles {
+			filesContent = append(filesContent, fmt.Sprintf("=== %s ===\n%s", name, content))
+		}
+		prompt = strings.ReplaceAll(prompt, "{ADDITIONAL_FILES}", strings.Join(filesContent, "\n\n"))
+	} else {
+		prompt = strings.ReplaceAll(prompt, "{ADDITIONAL_FILES}", "[No additional files present - this may be due to local PKGBUILD analysis limitations]")
+	}
+	
 	return prompt
 }
 
@@ -542,35 +563,71 @@ func (c *ClaudeProvider) getPromptTemplate() string {
 	}
 	
 	// Fallback to hardcoded default if config is not available
-	return `Analyze this PKGBUILD for security entropy (unpredictability/risk factors):
+	return `You are a security expert analyzing AUR packages for malicious behavior. Your PRIMARY goal is to detect and flag dangerous code patterns.
 
-PACKAGE INFO:
+<critical_patterns>
+SCAN FOR THESE MALICIOUS PATTERNS FIRST:
+1. curl/wget piped to shell: curl URL | sh, wget -O- URL | bash
+2. Downloading and executing code: python -c "$(curl ...)", eval "$(wget ...)"
+3. Base64/hex encoded commands: echo BASE64 | base64 -d | sh
+4. Commands in install hooks: post_install() running executables
+5. Suspicious URLs: URL shorteners, paste sites, non-official domains
+6. Hidden network activity: Background downloads, data exfiltration
+7. System modification: Writing to /usr/bin during build, modifying system files
+8. Obfuscated scripts: Encoded strings, complex redirections, hidden commands
+</critical_patterns>
+
+<package_context>
 Name: {NAME} | Version: {VERSION} | Maintainer: {MAINTAINER}
-Votes: {VOTES} | Popularity: {POPULARITY} | First: {FIRST_SUBMITTED} | Updated: {LAST_UPDATED}
-Dependencies: {DEPENDENCIES} | Build Deps: {MAKE_DEPENDS}
+Votes: {VOTES} | Popularity: {POPULARITY}
+First Submitted: {FIRST_SUBMITTED} | Last Updated: {LAST_UPDATED}
+Dependencies: {DEPENDENCIES}
+Build Dependencies: {MAKE_DEPENDS}
+</package_context>
 
-PKGBUILD:
+<pkgbuild_content>
 {PKGBUILD}
+</pkgbuild_content>
 
-Provide detailed JSON analysis with:
+<install_script>
+{INSTALL_SCRIPT}
+</install_script>
+
+<additional_files>
+{ADDITIONAL_FILES}
+</additional_files>
+
+<analysis_instructions>
+1. FIRST check ALL files for the critical patterns listed above
+2. Pay special attention to .install scripts and helper scripts
+3. Look for ANY network activity (curl, wget, git clone during runtime)
+4. Check for code execution during install/upgrade hooks
+5. Verify all URLs point to official/trusted sources
+6. Flag ANY obfuscation or encoding of commands
+</analysis_instructions>
+
+<response_format>
+Provide ONLY a JSON response:
 {
   "overall_entropy": "MINIMAL|LOW|MODERATE|HIGH|CRITICAL",
-  "summary": "comprehensive security assessment with key concerns",
+  "summary": "Clear statement of findings, especially any malicious code",
   "recommendation": "PROCEED|REVIEW|BLOCK",
   "findings": [
     {
-      "type": "source_analysis|build_process|file_operations|maintainer_trust|dependency_analysis",
-      "entropy": "MINIMAL|LOW|MODERATE|HIGH|CRITICAL", 
-      "description": "what was found",
-      "context": "relevant code snippet",
-      "suggestion": "specific action to take",
-      "line_number": 0
+      "type": "malicious_code|suspicious_behavior|source_analysis|build_process|file_operations|maintainer_trust|dependency_analysis",
+      "entropy": "MINIMAL|LOW|MODERATE|HIGH|CRITICAL",
+      "description": "Specific description of the threat",
+      "context": "Exact code snippet showing the issue",
+      "line_number": 0,
+      "file": "filename where found (PKGBUILD, .install, etc)",
+      "suggestion": "Remove this package immediately / Review before installing / etc"
     }
   ],
-  "entropy_factors": ["factor1", "factor2"],
-  "educational_summary": "what users should learn from this analysis",
-  "security_lessons": ["lesson1", "lesson2", "lesson3"]
+  "entropy_factors": ["list of specific risk factors found"],
+  "educational_summary": "What this attack vector teaches about AUR security",
+  "security_lessons": ["Key takeaways for users"]
 }
+</response_format>
 
-Focus on: source compilation vs repackaging, multiple sources, network requests during build, code obfuscation, maintainer trust, dependency risks.`
+REMEMBER: Any code execution during installation, hidden network requests, or obfuscated commands should result in CRITICAL entropy and BLOCK recommendation.`
 }

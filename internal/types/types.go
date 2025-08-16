@@ -104,6 +104,9 @@ type PackageInfo struct {
 	Dependencies     []string `json:"dependencies,omitempty"`
 	MakeDepends      []string `json:"make_depends,omitempty"`
 	OptDepends       []string `json:"opt_depends,omitempty"`
+	// Additional files for analysis
+	InstallScript   string            `json:"install_script,omitempty"`
+	AdditionalFiles map[string]string `json:"additional_files,omitempty"` // filename -> content
 }
 
 // AIProvider interface for different AI backends
