@@ -61,7 +61,7 @@ func Load() (*types.Config, error) {
 		Prompts: struct {
 			SecurityAnalysis string `yaml:"security_analysis"`
 		}{
-			SecurityAnalysis: getDefaultSecurityPrompt(),
+			SecurityAnalysis: GetDefaultSecurityPrompt(),
 		},
 		UI: struct {
 			ShowDetails   bool `yaml:"show_details"`
@@ -131,7 +131,7 @@ func InitializeConfig() error {
 		Prompts: struct {
 			SecurityAnalysis string `yaml:"security_analysis"`
 		}{
-			SecurityAnalysis: getDefaultSecurityPrompt(),
+			SecurityAnalysis: GetDefaultSecurityPrompt(),
 		},
 		UI: struct {
 			ShowDetails   bool `yaml:"show_details"`
@@ -194,7 +194,7 @@ func setDefaults() {
 	viper.SetDefault("cache.max_size_mb", 100)
 	viper.SetDefault("cache.compress", false)
 	
-	viper.SetDefault("prompts.security_analysis", getDefaultSecurityPrompt())
+	viper.SetDefault("prompts.security_analysis", GetDefaultSecurityPrompt())
 	
 	viper.SetDefault("ui.show_details", true)
 	viper.SetDefault("ui.use_colors", true)
@@ -230,8 +230,8 @@ func validateConfig(cfg *types.Config) error {
 	return nil
 }
 
-// getDefaultSecurityPrompt returns the default security analysis prompt template
-func getDefaultSecurityPrompt() string {
+// GetDefaultSecurityPrompt returns the default security analysis prompt template
+func GetDefaultSecurityPrompt() string {
 	return `You are a security expert analyzing AUR packages for malicious behavior. Your PRIMARY goal is to detect and flag dangerous code patterns.
 
 <critical_patterns>

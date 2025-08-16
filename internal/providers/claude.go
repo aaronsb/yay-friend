@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aaronsb/yay-friend/internal/config"
 	"github.com/aaronsb/yay-friend/internal/types"
 )
 
@@ -181,227 +182,33 @@ func (c *ClaudeProvider) GetCapabilities() types.ProviderCapabilities {
 	}
 }
 
-// buildSecurityPrompt creates the security analysis prompt with content truncation
-func (c *ClaudeProvider) buildSecurityPrompt(pkgInfo types.PackageInfo) string {
-	// Truncate PKGBUILD if too long (200 lines max as suggested)
-	pkgbuildLines := strings.Split(pkgInfo.PKGBUILD, "\n")
-	if len(pkgbuildLines) > 200 {
-		pkgbuildLines = pkgbuildLines[:200]
-		pkgbuildLines = append(pkgbuildLines, "", "... [TRUNCATED - Original PKGBUILD longer than 200 lines]")
-	}
-	truncatedPKGBUILD := strings.Join(pkgbuildLines, "\n")
-	
-	// Limit comments to prevent prompt bloat (max 3 comments, 100 chars each)
-	limitedComments := pkgInfo.Comments
-	if len(limitedComments) > 3 {
-		limitedComments = limitedComments[:3]
-	}
-	var shortComments []string
-	for _, comment := range limitedComments {
-		if len(comment) > 100 {
-			comment = comment[:97] + "..."
-		}
-		shortComments = append(shortComments, comment)
-	}
-	
-	// Build dependency strings
-	depends := strings.Join(pkgInfo.Dependencies, ", ")
-	makeDepends := strings.Join(pkgInfo.MakeDepends, ", ")
-	if len(depends) > 200 {
-		depends = depends[:197] + "..."
-	}
-	if len(makeDepends) > 200 {
-		makeDepends = makeDepends[:197] + "..."
-	}
-	return fmt.Sprintf(`You are a security expert conducting a systematic analysis of PKGBUILD files from the Arch User Repository (AUR). 
-
-Your task is to perform a comprehensive security entropy analysis following this structured template:
-
-=== PACKAGE INFORMATION ===
-Package: %s
-Version: %s
-Description: %s
-Maintainer: %s
-AUR Page: %s
-
-=== AUR CONTEXT ===
-Last Updated: %s
-First Submitted: %s
-Votes: %d
-Popularity: %.3f
-Dependencies: %s
-Make Dependencies: %s
-AUR Comments/Warnings: %s
-
-=== PKGBUILD CONTENT ===
-%s
-
-=== ANALYSIS FRAMEWORK ===
-
-You must systematically evaluate each of these security dimensions and provide specific findings:
-
-1. **SOURCE ANALYSIS** - Examine source array and origins:
-   - Official sources vs third-party/unknown sources
-   - Multiple source origins (increases entropy)
-   - Source URL patterns (GitHub official vs random repos)
-   - Version consistency and authenticity
-
-2. **BUILD PROCESS ANALYSIS** - Examine build() and package() functions:
-   - Source compilation vs simple repackaging  
-   - Custom build scripts and patches
-   - Network requests during build (wget, curl, git clone)
-   - System modifications during build
-
-3. **FILE OPERATIONS ANALYSIS** - Examine file handling:
-   - Files installed outside $pkgdir
-   - Setuid/setgid files creation
-   - System configuration modifications
-   - Unusual file permissions
-
-4. **CODE EXECUTION ANALYSIS** - Examine dynamic code:
-   - eval, exec with dynamic content
-   - Base64/hex encoded commands
-   - Downloaded scripts being executed
-   - Shell obfuscation patterns
-
-5. **DEPENDENCY ANALYSIS** - Examine dependencies:
-   - Unusual or suspicious dependencies
-   - -git or -bin variant dependencies
-   - Dependency confusion risks
-
-6. **MAINTAINER TRUST ANALYSIS** - Evaluate maintainer context:
-   - New vs established maintainer
-   - Package update patterns
-   - Maintainer reputation indicators
-
-For each finding, provide:
-- **Type**: Category of finding (source_analysis, build_process, file_operations, etc.)
-- **Entropy Level**: MINIMAL/LOW/MODERATE/HIGH/CRITICAL
-- **Description**: What specifically was found
-- **Context**: Relevant code snippet or detail
-- **Entropy Notes**: Why this increases/decreases predictability and risk
-- **Suggestion**: How to mitigate or verify this finding
-
-Respond ONLY with a JSON object in this exact format:
-{
-  "overall_entropy": "MINIMAL|LOW|MODERATE|HIGH|CRITICAL",
-  "overall_level": "MINIMAL|LOW|MODERATE|HIGH|CRITICAL",
-  "findings": [
-    {
-      "type": "source_analysis|build_process|file_operations|code_execution|dependency_analysis|maintainer_trust",
-      "entropy": "MINIMAL|LOW|MODERATE|HIGH|CRITICAL",
-      "severity": "MINIMAL|LOW|MODERATE|HIGH|CRITICAL", 
-      "description": "detailed description of what was found",
-      "line_number": 0,
-      "context": "relevant code snippet",
-      "suggestion": "specific mitigation or verification steps",
-      "entropy_notes": "educational explanation of why this affects security predictability"
-    }
-  ],
-  "summary": "comprehensive assessment with educational context",
-  "recommendation": "PROCEED|REVIEW|BLOCK",
-  "entropy_factors": ["specific", "factors", "that", "increase", "uncertainty"],
-  "predictability_score": 0.5,
-  "educational_summary": "What users should learn from this analysis - explain key security concepts, red flags to watch for, and general PKGBUILD security principles demonstrated in this package",
-  "security_lessons": ["Key lesson 1", "Key lesson 2", "Key lesson 3"]
-}
-
-CRITICAL SECURITY ENTROPY ANALYSIS:
-
-Think of "entropy" as unpredictability and uncertainty - the more unknowns and variables, the higher the entropy.
-
-1. **SOURCE COMPILATION vs REPACKAGING (HIGH ENTROPY)**:
-   - Source compilation = HIGH ENTROPY (arbitrary code execution, build-time attacks)
-   - Look for: make, cmake, ./configure, cargo build, go build, npm run build, etc.
-   - Simple repackaging = LOW ENTROPY (predictable file operations)
-   - Entropy increases with: custom build scripts, patches, complex build processes
-
-2. **MULTIPLE SOURCE ORIGINS (MAXIMUM ENTROPY)**:
-   - Each additional source MULTIPLIES uncertainty and attack surface
-   - CRITICAL ENTROPY: mixing official sources with random repos/URLs
-   - Look for multiple different domains/repositories in source=() array  
-   - Entropy factors: untrusted sources, different maintainers, varying trust levels
-
-3. **NETWORK REQUEST ANALYSIS**:
-   - wget, curl, git clone from untrusted sources during build()
-   - Downloads during build process (not just in source=() array)
-   - Downloading executable scripts and running them
-   - Fetching from pastebin, raw GitHub, or URL shorteners
-
-4. **BUILD PROCESS MANIPULATION**:
-   - Modifying system files during build
-   - Installing files outside of $pkgdir
-   - Running commands as root or with elevated privileges
-   - Patching source code with suspicious modifications
-
-5. **OBFUSCATION AND ENCODING**:
-   - Base64 encoded commands or data
-   - Hex-encoded strings being decoded and executed  
-   - eval, exec with dynamic content
-   - Compressed or archived scripts being extracted and run
-
-6. **PACKAGE STRUCTURE ANOMALIES**:
-   - Unusual dependencies (especially -git or -bin variants)
-   - Conflicting package descriptions vs actual functionality
-   - Packages with generic names but specific functionality
-   - Missing or incomplete metadata
-
-7. **SUSPICIOUS FILE OPERATIONS**:
-   - Writing to /tmp with predictable names (race conditions)
-   - Creating setuid/setgid files
-   - Modifying system configuration files
-   - Installing to unusual system directories
-
-8. **TRUST INDICATORS** (consider for severity adjustment):
-   - Package age and update history (if maintainer info suggests new/untrusted)
-   - Maintainer reputation (new accounts are riskier)
-   - Single vs multiple contributors
-   - Frequency and nature of updates
-
-**ENTROPY SEVERITY GUIDELINES**:
-- CRITICAL: Maximum chaos - multiple sources + compilation + runtime downloads + obfuscation
-- HIGH: High unpredictability - source compilation + suspicious network activity + new maintainer
-- MODERATE: Concerning uncertainty - compilation OR multiple sources OR obfuscation  
-- LOW: Minor unpredictability - simple repackaging with minor anomalies
-- MINIMAL: Highly predictable - simple repackaging from official sources, established maintainer
-
-**ENTROPY FACTORS TO TRACK**:
-- Source compilation (vs simple repackaging)
-- Multiple/untrusted source origins  
-- Network requests during build
-- Code obfuscation/encoding
-- New/unknown maintainer
-- Complex build processes
-- Runtime code generation
-- Dependency confusion risks
-
-Focus on UNPREDICTABILITY and UNCERTAINTY as security entropy indicators. The more variables and unknowns, the higher the entropy.
-
-**AUR CONTEXT ANALYSIS GUIDELINES:**
-- Recent updates indicate active maintenance (good) vs abandonment (concerning)
-- High vote counts and popularity suggest community trust
-- Comments may reveal security concerns, build issues, or user experiences
-- Long-established packages (older first submitted dates) tend to be more stable
-- Rapid update frequency could indicate instability or active development
-- Dependencies can reveal complexity and attack surface
-- Make dependencies show build-time requirements and potential risks`, 
-		pkgInfo.Name, 
-		pkgInfo.Version,
-		pkgInfo.Description,
-		pkgInfo.Maintainer,
-		pkgInfo.AURPageURL,
-		pkgInfo.LastUpdated,
-		pkgInfo.FirstSubmitted,
-		pkgInfo.Votes,
-		pkgInfo.Popularity,
-		depends,
-		makeDepends,
-		strings.Join(shortComments, " | "),
-		truncatedPKGBUILD)
-}
 
 // parseAnalysisResponse parses Claude's JSON response
 func (c *ClaudeProvider) parseAnalysisResponse(response string, pkgInfo types.PackageInfo) (*types.SecurityAnalysis, error) {
+	// Remove markdown code blocks if present
+	response = strings.TrimSpace(response)
+	if strings.Contains(response, "```json") {
+		// Extract content between ```json and ```
+		start := strings.Index(response, "```json")
+		if start != -1 {
+			start += 7 // length of "```json"
+			end := strings.Index(response[start:], "```")
+			if end != -1 {
+				response = response[start:start+end]
+			}
+		}
+	} else if strings.Contains(response, "```") {
+		// Handle plain ``` blocks
+		start := strings.Index(response, "```")
+		if start != -1 {
+			start += 3 // length of "```"
+			end := strings.Index(response[start:], "```")
+			if end != -1 {
+				response = response[start:start+end]
+			}
+		}
+	}
+	
 	// Extract JSON from response (Claude might include extra text)
 	jsonStart := strings.Index(response, "{")
 	jsonEnd := strings.LastIndex(response, "}")
@@ -562,72 +369,6 @@ func (c *ClaudeProvider) getPromptTemplate() string {
 		return c.config.Prompts.SecurityAnalysis
 	}
 	
-	// Fallback to hardcoded default if config is not available
-	return `You are a security expert analyzing AUR packages for malicious behavior. Your PRIMARY goal is to detect and flag dangerous code patterns.
-
-<critical_patterns>
-SCAN FOR THESE MALICIOUS PATTERNS FIRST:
-1. curl/wget piped to shell: curl URL | sh, wget -O- URL | bash
-2. Downloading and executing code: python -c "$(curl ...)", eval "$(wget ...)"
-3. Base64/hex encoded commands: echo BASE64 | base64 -d | sh
-4. Commands in install hooks: post_install() running executables
-5. Suspicious URLs: URL shorteners, paste sites, non-official domains
-6. Hidden network activity: Background downloads, data exfiltration
-7. System modification: Writing to /usr/bin during build, modifying system files
-8. Obfuscated scripts: Encoded strings, complex redirections, hidden commands
-</critical_patterns>
-
-<package_context>
-Name: {NAME} | Version: {VERSION} | Maintainer: {MAINTAINER}
-Votes: {VOTES} | Popularity: {POPULARITY}
-First Submitted: {FIRST_SUBMITTED} | Last Updated: {LAST_UPDATED}
-Dependencies: {DEPENDENCIES}
-Build Dependencies: {MAKE_DEPENDS}
-</package_context>
-
-<pkgbuild_content>
-{PKGBUILD}
-</pkgbuild_content>
-
-<install_script>
-{INSTALL_SCRIPT}
-</install_script>
-
-<additional_files>
-{ADDITIONAL_FILES}
-</additional_files>
-
-<analysis_instructions>
-1. FIRST check ALL files for the critical patterns listed above
-2. Pay special attention to .install scripts and helper scripts
-3. Look for ANY network activity (curl, wget, git clone during runtime)
-4. Check for code execution during install/upgrade hooks
-5. Verify all URLs point to official/trusted sources
-6. Flag ANY obfuscation or encoding of commands
-</analysis_instructions>
-
-<response_format>
-Provide ONLY a JSON response:
-{
-  "overall_entropy": "MINIMAL|LOW|MODERATE|HIGH|CRITICAL",
-  "summary": "Clear statement of findings, especially any malicious code",
-  "recommendation": "PROCEED|REVIEW|BLOCK",
-  "findings": [
-    {
-      "type": "malicious_code|suspicious_behavior|source_analysis|build_process|file_operations|maintainer_trust|dependency_analysis",
-      "entropy": "MINIMAL|LOW|MODERATE|HIGH|CRITICAL",
-      "description": "Specific description of the threat",
-      "context": "Exact code snippet showing the issue",
-      "line_number": 0,
-      "file": "filename where found (PKGBUILD, .install, etc)",
-      "suggestion": "Remove this package immediately / Review before installing / etc"
-    }
-  ],
-  "entropy_factors": ["list of specific risk factors found"],
-  "educational_summary": "What this attack vector teaches about AUR security",
-  "security_lessons": ["Key takeaways for users"]
-}
-</response_format>
-
-REMEMBER: Any code execution during installation, hidden network requests, or obfuscated commands should result in CRITICAL entropy and BLOCK recommendation.`
+	// Use default prompt template when config is not initialized
+	return config.GetDefaultSecurityPrompt()
 }
