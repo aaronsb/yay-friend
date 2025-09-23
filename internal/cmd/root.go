@@ -142,7 +142,16 @@ func runInstall(ctx context.Context, args []string) error {
 	}
 
 	// If skip analysis or no packages to analyze, proceed directly
-	if skipAnalysis || len(operation.Packages) == 0 || operation.Operation != "install" {
+	if skipAnalysis || len(operation.Packages) == 0 {
+		if operation.Operation == "analyze" {
+			// For analyze-only mode, don't try to install
+			return fmt.Errorf("no packages specified for analysis")
+		}
+		return yayClient.InstallPackages(ctx, operation)
+	}
+
+	// For non-install operations (like -Q, -R, etc.), pass through to yay
+	if operation.Operation != "install" && operation.Operation != "analyze" {
 		return yayClient.InstallPackages(ctx, operation)
 	}
 
@@ -215,15 +224,43 @@ func runInstall(ctx context.Context, args []string) error {
 	}
 
 	// Analyze packages
+	allSafe := true
 	for _, packageName := range operation.Packages {
 		if err := analyzeAndDecide(ctx, yayClient, aiProvider, packageName, cfg); err != nil {
 			return fmt.Errorf("analysis failed for %s: %w", packageName, err)
 		}
 	}
 
-	// If we get here, all packages passed analysis, proceed with installation
-	fmt.Printf("✅ All packages passed security analysis, proceeding with installation...\n")
-	return yayClient.InstallPackages(ctx, operation)
+	// If we get here, all packages passed analysis
+	if operation.Operation == "analyze" {
+		// In analyze-only mode, ask user if they want to proceed with installation
+		if allSafe {
+			fmt.Printf("\n✅ All packages passed security analysis.\n")
+			fmt.Printf("Would you like to proceed with installation? [y/N]: ")
+
+			var response string
+			fmt.Scanln(&response)
+			response = strings.ToLower(strings.TrimSpace(response))
+
+			if response == "y" || response == "yes" {
+				// Change operation to install and proceed
+				operation.Command = "-S"
+				operation.Operation = "install"
+				fmt.Printf("Proceeding with installation...\n")
+				return yayClient.InstallPackages(ctx, operation)
+			} else {
+				fmt.Printf("Installation cancelled.\n")
+				return nil
+			}
+		} else {
+			fmt.Printf("\n⚠️  Security concerns found. Installation not recommended.\n")
+			return nil
+		}
+	} else {
+		// Regular install mode, proceed automatically if safe
+		fmt.Printf("✅ All packages passed security analysis, proceeding with installation...\n")
+		return yayClient.InstallPackages(ctx, operation)
+	}
 }
 
 // analyzeAndDecide analyzes a package and decides whether to proceed

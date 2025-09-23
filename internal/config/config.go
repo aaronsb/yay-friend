@@ -94,9 +94,10 @@ func InitializeConfig() error {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	// Check if config already exists
+	// Check if config already exists and inform user
 	if _, err := os.Stat(configPath); err == nil {
-		return fmt.Errorf("configuration file already exists at %s", configPath)
+		fmt.Printf("Configuration file already exists at %s\n", configPath)
+		fmt.Println("Overwriting with default configuration...")
 	}
 
 	// Create default config

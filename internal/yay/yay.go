@@ -205,10 +205,10 @@ func ParseYayCommand(args []string) (*types.YayOperation, error) {
 
 		return operation, nil
 	} else {
-		// First arg is not a flag, assume it's a package search/install
+		// First arg is not a flag, assume it's just analysis (no install)
 		return &types.YayOperation{
-			Command:   "-S", // Default to install
-			Operation: "install",
+			Command:   "", // No command means analyze-only
+			Operation: "analyze",
 			Flags:     []string{},
 			Packages:  args, // All args are packages
 		}, nil

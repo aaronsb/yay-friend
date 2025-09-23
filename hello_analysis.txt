@@ -1,8 +1,0 @@
-🔍 Analyzing hello with claude...
-
-[1mCollected for Analysis:
-[0m─────────────────────────
-• PKGBUILD: 28 lines of shell script
-• Package metadata: hello v2.12.1 by Matthew Sexton <mssxtn@gmail.com
-
-Analyzing with Claude...

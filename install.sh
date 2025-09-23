@@ -97,31 +97,58 @@ get_binary() {
 # Function to build from source
 build_from_source() {
     print_info "Building from source..."
-    
-    TEMP_DIR=$(mktemp -d)
-    cd "$TEMP_DIR"
-    
-    print_info "Cloning repository..."
-    git clone "$REPO_URL" .
-    
-    print_info "Building binary with version info..."
-    # Get version info
-    VERSION=${VERSION:-"0.1.0"}
-    GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-    BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    
-    # Build with version info
-    LDFLAGS="-X github.com/aaronsb/yay-friend/internal/version.Version=${VERSION}"
-    LDFLAGS="${LDFLAGS} -X github.com/aaronsb/yay-friend/internal/version.GitCommit=${GIT_COMMIT}"
-    LDFLAGS="${LDFLAGS} -X github.com/aaronsb/yay-friend/internal/version.BuildDate=${BUILD_DATE}"
-    
-    go build -ldflags "${LDFLAGS}" -o "$BINARY_NAME" ./cmd/yay-friend
-    
-    if [[ ! -f "$BINARY_NAME" ]]; then
-        print_error "Failed to build binary"
-        exit 1
+
+    if [[ "$BUILD_LOCAL" == "true" ]]; then
+        # Build from current directory
+        print_info "Building from local directory..."
+
+        # Save current directory
+        ORIGINAL_DIR=$(pwd)
+
+        print_info "Building binary with version info..."
+        # Get version info
+        VERSION=${VERSION:-"0.1.0"}
+        GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+        BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+        # Build with version info
+        LDFLAGS="-X github.com/aaronsb/yay-friend/internal/version.Version=${VERSION}"
+        LDFLAGS="${LDFLAGS} -X github.com/aaronsb/yay-friend/internal/version.GitCommit=${GIT_COMMIT}"
+        LDFLAGS="${LDFLAGS} -X github.com/aaronsb/yay-friend/internal/version.BuildDate=${BUILD_DATE}"
+
+        go build -ldflags "${LDFLAGS}" -o "$BINARY_NAME" ./cmd/yay-friend
+
+        if [[ ! -f "$BINARY_NAME" ]]; then
+            print_error "Failed to build binary"
+            exit 1
+        fi
+    else
+        # Build from GitHub
+        TEMP_DIR=$(mktemp -d)
+        cd "$TEMP_DIR"
+
+        print_info "Cloning repository..."
+        git clone "$REPO_URL" .
+
+        print_info "Building binary with version info..."
+        # Get version info
+        VERSION=${VERSION:-"0.1.0"}
+        GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+        BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+        # Build with version info
+        LDFLAGS="-X github.com/aaronsb/yay-friend/internal/version.Version=${VERSION}"
+        LDFLAGS="${LDFLAGS} -X github.com/aaronsb/yay-friend/internal/version.GitCommit=${GIT_COMMIT}"
+        LDFLAGS="${LDFLAGS} -X github.com/aaronsb/yay-friend/internal/version.BuildDate=${BUILD_DATE}"
+
+        go build -ldflags "${LDFLAGS}" -o "$BINARY_NAME" ./cmd/yay-friend
+
+        if [[ ! -f "$BINARY_NAME" ]]; then
+            print_error "Failed to build binary"
+            exit 1
+        fi
     fi
-    
+
     print_success "Binary built successfully"
 }
 
@@ -194,12 +221,14 @@ show_usage() {
     echo "  --system        Install system-wide (requires sudo)"
     echo "  --build         Build from source (default)"
     echo "  --download      Download pre-built binary (when available)"
+    echo "  --local         Build from current directory instead of GitHub"
     echo "  --help          Show this help message"
     echo ""
     echo "Examples:"
     echo "  $0                    # User install, build from source"
     echo "  $0 --system          # System install, build from source"
     echo "  $0 --user --download # User install, download binary"
+    echo "  $0 --local          # Build and install from current directory"
 }
 
 # Main installation logic
@@ -207,7 +236,8 @@ main() {
     # Default options
     INSTALL_SCOPE="user"
     BUILD_FROM_SOURCE="true"
-    
+    BUILD_LOCAL="false"
+
     # Parse command line arguments
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -227,6 +257,11 @@ main() {
                 BUILD_FROM_SOURCE="false"
                 shift
                 ;;
+            --local)
+                BUILD_LOCAL="true"
+                BUILD_FROM_SOURCE="true"
+                shift
+                ;;
             --help)
                 show_usage
                 exit 0
@@ -241,7 +276,11 @@ main() {
     
     print_info "Starting yay-friend installation..."
     print_info "Install scope: $INSTALL_SCOPE"
-    print_info "Build method: $([ "$BUILD_FROM_SOURCE" == "true" ] && echo "source" || echo "download")"
+    if [[ "$BUILD_LOCAL" == "true" ]]; then
+        print_info "Build method: local directory"
+    else
+        print_info "Build method: $([ "$BUILD_FROM_SOURCE" == "true" ] && echo "source (from GitHub)" || echo "download")"
+    fi
     
     # Detect platform
     detect_platform

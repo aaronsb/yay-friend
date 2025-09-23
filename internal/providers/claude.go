@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -113,23 +114,30 @@ func (c *ClaudeProvider) AnalyzePKGBUILDWithOptions(ctx context.Context, pkgInfo
 	}
 
 	prompt := c.buildSimpleSecurityPrompt(pkgInfo)
-	
+
 	// Debug: Write the full prompt to see what's being sent
 	os.WriteFile("/tmp/claude-final-prompt.txt", []byte(prompt), 0644)
+
+	// Get or create a dedicated directory for claude executions
+	claudeWorkDir := c.getClaudeWorkDir()
+	if err := os.MkdirAll(claudeWorkDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create claude work directory: %w", err)
+	}
 	
 	var output []byte
 	var err error
 	
 	if noSpinner {
 		fmt.Printf("Analyzing with Claude...\n")
-		// No spinner - just run claude directly
-		cmd := exec.CommandContext(ctx, c.claudePath)
+		// No spinner - just run claude directly with --print flag
+		cmd := exec.CommandContext(ctx, c.claudePath, "--print")
+		cmd.Dir = claudeWorkDir // Set working directory to avoid polluting other histories
 		cmd.Stdin = strings.NewReader(prompt)
 		output, err = cmd.Output()
 		fmt.Printf("Analysis complete.\n")
 	} else {
 		fmt.Printf("Analyzing with Claude... ")
-		
+
 		// Start spinner in a goroutine
 		done := make(chan bool)
 		go func() {
@@ -147,13 +155,14 @@ func (c *ClaudeProvider) AnalyzePKGBUILDWithOptions(ctx context.Context, pkgInfo
 				}
 			}
 		}()
-		
-		// Run claude with the prompt via stdin
-		cmd := exec.CommandContext(ctx, c.claudePath)
+
+		// Run claude with the prompt via stdin using --print flag for non-interactive mode
+		cmd := exec.CommandContext(ctx, c.claudePath, "--print")
+		cmd.Dir = claudeWorkDir // Set working directory to avoid polluting other histories
 		cmd.Stdin = strings.NewReader(prompt)
 		output, err = cmd.Output()
-		
-		// Stop spinner and clear line  
+
+		// Stop spinner and clear line
 		done <- true
 		time.Sleep(10 * time.Millisecond) // Give spinner time to clear
 		fmt.Printf("\rAnalyzing with Claude... Complete!\n")
@@ -368,7 +377,23 @@ func (c *ClaudeProvider) getPromptTemplate() string {
 	if c.config != nil && c.config.Prompts.SecurityAnalysis != "" {
 		return c.config.Prompts.SecurityAnalysis
 	}
-	
+
 	// Use default prompt template when config is not initialized
 	return config.GetDefaultSecurityPrompt()
+}
+
+// getClaudeWorkDir returns a dedicated directory for claude executions
+func (c *ClaudeProvider) getClaudeWorkDir() string {
+	// Use the same logic as cache to get XDG-compliant directory
+	if xdgData := os.Getenv("XDG_DATA_HOME"); xdgData != "" {
+		return filepath.Join(xdgData, "yay-friend", "claude-work")
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		// Fallback to current directory if we can't determine home
+		return ".yay-friend-claude"
+	}
+
+	return filepath.Join(home, ".local", "share", "yay-friend", "claude-work")
 }
