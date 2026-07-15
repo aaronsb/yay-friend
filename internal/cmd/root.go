@@ -9,7 +9,6 @@ import (
 
 	"github.com/gookit/color"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 
 	"github.com/aaronsb/yay-friend/internal/aur"
 	"github.com/aaronsb/yay-friend/internal/cache"
@@ -96,23 +95,10 @@ func init() {
 	rootCmd.AddCommand(newVersionCmd())
 }
 
-// initConfig reads in config file and ENV variables.
+// initConfig wires the --config flag into the config package so that
+// config.Load reads from the requested file (or the default path when empty).
 func initConfig() {
-	if cfgFile != "" {
-		viper.SetConfigFile(cfgFile)
-	} else {
-		configDir := getConfigDir()
-		viper.AddConfigPath(configDir)
-		viper.SetConfigType("yaml")
-		viper.SetConfigName("config")
-	}
-
-	viper.AutomaticEnv()
-
-	// If a config file is found, read it in.
-	if err := viper.ReadInConfig(); err == nil && verbose {
-		fmt.Fprintln(os.Stderr, "Using config file:", viper.ConfigFileUsed())
-	}
+	config.SetConfigPath(cfgFile)
 }
 
 // runInstall handles the main package installation workflow  
