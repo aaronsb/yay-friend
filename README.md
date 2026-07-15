@@ -313,8 +313,11 @@ claude:
 > **Note:** `config.yaml` is loaded as an **overlay** on the built-in defaults — set
 > only the keys you want to change; anything you omit keeps its default. Change values
 > with `yay-friend config set <key> <value>` (dotted keys, e.g. `config set claude.model opus`,
-> `config set cache.enabled false`) or by editing the file directly. Invalid values are
-> validated and rejected before they're written.
+> `config set cache.enabled false`) or by editing the file directly. Invalid values,
+> unknown keys, and type mismatches are rejected before anything is written. `config set`
+> handles scalar values (strings, ints, bools); to set a list (e.g. `yay.default_flags`),
+> edit the file. Note the overlay merges map entries (a partial `providers:` keeps the
+> untouched defaults) but replaces lists wholesale.
 
 ## 🧪 Development & Testing
 
