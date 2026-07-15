@@ -33,6 +33,15 @@ A security-focused wrapper around `yay` that uses AI to analyze PKGBUILD files f
 
 ## 🚀 Installation
 
+### From the AUR (recommended)
+```bash
+# with an existing AUR helper
+yay -S yay-friend-git      # or: paru -S yay-friend-git
+```
+Builds the latest `main` from source. Requires `git` and `yay`; install
+[`claude-code`](https://aur.archlinux.org/packages/claude-code) (or have any
+`claude` CLI on your `PATH`) for the AI analysis.
+
 ### Quick Install (User Scope)
 ```bash
 curl -sSL https://raw.githubusercontent.com/aaronsb/yay-friend/main/install.sh | bash
