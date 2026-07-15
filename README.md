@@ -24,7 +24,7 @@ A security-focused wrapper around `yay` that uses AI to analyze PKGBUILD files f
 
 - 🌪️ **Security Entropy Analysis** - Multi-factor risk assessment using AI
 - 🤖 **Claude Code Powered** - Runs your local Claude Code headless; no API key required (Qwen/Copilot/Goose providers are stubbed for the future — see [#1](https://github.com/aaronsb/yay-friend/issues/1))
-- 🔒 **Locked-down analysis** - Isolated Claude call with all tools denied, so untrusted PKGBUILDs can't execute anything
+- 🔒 **Locked-down analysis** - Isolated Claude call with built-in tools denied (defense-in-depth), so untrusted PKGBUILDs are read, not executed
 - 📊 **Comprehensive Analysis** - Source compilation, multiple origins, maintainer trust
 - ⚡ **Intelligent Caching** - Commit-hash based analysis caching for performance
 - 📡 **Malicious Package Reporting** - Automated threat intelligence sharing
@@ -73,9 +73,10 @@ and reads back the analysis. This has a few important consequences:
   [headless/programmatic mode](https://code.claude.com/docs/en/headless), the same
   mechanism the Claude Agent SDK is built on.
 - **Analysis runs locked down.** The Claude call is isolated: your MCP servers are
-  disabled and *all* built-in tools (Bash, file access, web) are denied, so an
-  untrusted PKGBUILD can be read and classified but can never cause Claude to
-  execute anything on your machine.
+  disabled and the known built-in tools (Bash, file access, web) are denied, so an
+  untrusted PKGBUILD is read and classified rather than executed. This is
+  defense-in-depth (an enumerated deny-list plus headless permission checks), not
+  a hard sandbox — see the `deniedTools` note in `internal/providers/claude.go`.
 
 > **Prerequisite:** Install and sign in to [Claude Code](https://claude.com/claude-code)
 > first (`claude` must be on your `PATH`). Verify with `yay-friend provider test claude`.

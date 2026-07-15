@@ -17,10 +17,16 @@ import (
 	"github.com/aaronsb/yay-friend/internal/types"
 )
 
-// deniedTools lists every built-in Claude Code tool yay-friend forbids during
+// deniedTools lists the built-in Claude Code tools yay-friend forbids during
 // analysis. A PKGBUILD is untrusted input that may attempt prompt injection, so
-// the model must only read and classify the text we hand it — never execute,
+// the model should only read and classify the text we hand it — not execute,
 // write, or fetch anything.
+//
+// NOTE: this is an enumerated deny-list, current as of Claude Code 2.1.x. It is
+// best-effort, not a hard sandbox: a built-in tool added in a future Claude
+// release would not be covered until added here. It is one layer of
+// defense-in-depth alongside headless mode's own permission checks. If Claude
+// Code ever supports an empty allow-list that fails closed, prefer that.
 var deniedTools = []string{
 	"Bash", "Edit", "Write", "NotebookEdit", "Read", "Glob", "Grep",
 	"WebFetch", "WebSearch", "Task", "TodoWrite",
@@ -187,14 +193,15 @@ func (c *ClaudeProvider) baseClaudeArgs() []string {
 func (c *ClaudeProvider) runClaudeOneShot(ctx context.Context, prompt, workDir string) (string, error) {
 	args := append([]string{"--print", "--output-format", "json"}, c.baseClaudeArgs()...)
 
-	fmt.Println("Analyzing with Claude...")
+	// Status goes to stderr so stdout stays clean for callers capturing output.
+	fmt.Fprintln(os.Stderr, "Analyzing with Claude...")
 	cmd := exec.CommandContext(ctx, c.claudePath, args...)
 	cmd.Dir = workDir
 	cmd.Stdin = strings.NewReader(prompt)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	output, err := cmd.Output()
-	fmt.Println("Analysis complete.")
+	fmt.Fprintln(os.Stderr, "Analysis complete.")
 
 	if err != nil {
 		if stderr.Len() > 0 {
@@ -230,8 +237,13 @@ func (c *ClaudeProvider) runClaudeStreaming(ctx context.Context, prompt, workDir
 	phase := "starting"
 
 	// Progress ticker: repaint the elapsed/phase line a few times a second.
+	// wg lets us join the goroutine before printing the final line, so a stale
+	// in-progress repaint can never land after "complete".
 	doneTick := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		ticker := time.NewTicker(200 * time.Millisecond)
 		defer ticker.Stop()
 		for {
@@ -248,8 +260,12 @@ func (c *ClaudeProvider) runClaudeStreaming(ctx context.Context, prompt, workDir
 	}()
 
 	// Read events as they arrive. Use a Reader (not Scanner) so a large result
-	// line can't blow past a fixed token limit.
+	// line can't blow past a fixed token limit. We also accumulate the assistant
+	// message text: it carries the same JSON as the result event, so it's a
+	// fallback if the result event is missing or unparseable (parity with the
+	// one-shot path, which falls back to raw text).
 	var resultEvent *claudeEvent
+	var assistantText strings.Builder
 	reader := bufio.NewReader(stdout)
 	for {
 		line, rerr := reader.ReadString('\n')
@@ -261,6 +277,11 @@ func (c *ClaudeProvider) runClaudeStreaming(ctx context.Context, prompt, workDir
 					mu.Lock()
 					phase = "receiving"
 					mu.Unlock()
+					for _, block := range ev.Message.Content {
+						if block.Type == "text" {
+							assistantText.WriteString(block.Text)
+						}
+					}
 				case "result":
 					e := ev
 					resultEvent = &e
@@ -273,6 +294,7 @@ func (c *ClaudeProvider) runClaudeStreaming(ctx context.Context, prompt, workDir
 	}
 
 	close(doneTick)
+	wg.Wait()
 	waitErr := cmd.Wait()
 	fmt.Printf("\r\033[KAnalyzing with Claude… complete (%ds).\n", int(time.Since(start).Seconds()))
 
@@ -285,6 +307,10 @@ func (c *ClaudeProvider) runClaudeStreaming(ctx context.Context, prompt, workDir
 			return "", fmt.Errorf("claude reported an error: %s", msg)
 		}
 		return resultEvent.Result, nil
+	}
+	// No usable result event; fall back to the assistant text if we captured any.
+	if text := strings.TrimSpace(assistantText.String()); text != "" {
+		return text, nil
 	}
 	if waitErr != nil {
 		if stderr.Len() > 0 {
@@ -321,6 +347,14 @@ type claudeEvent struct {
 	Subtype string `json:"subtype"`
 	IsError bool   `json:"is_error"`
 	Result  string `json:"result"`
+	// Message is populated only on "assistant" events in the stream-json format;
+	// its text blocks carry the model's output.
+	Message struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	} `json:"message"`
 }
 
 // extractClaudeResult unwraps the JSON envelope from `claude --output-format json`
