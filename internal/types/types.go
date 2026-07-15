@@ -153,6 +153,9 @@ type Config struct {
 		Path  string   `yaml:"path"`
 		Flags []string `yaml:"default_flags"`
 	} `yaml:"yay"`
+	Claude struct {
+		Model string `yaml:"model"` // model alias passed to `claude --model` (e.g. "sonnet", "opus")
+	} `yaml:"claude"`
 }
 
 // YayOperation represents the operation to perform with yay

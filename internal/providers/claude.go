@@ -1,6 +1,8 @@
 package providers
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,11 +10,27 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aaronsb/yay-friend/internal/config"
 	"github.com/aaronsb/yay-friend/internal/types"
 )
+
+// deniedTools lists the built-in Claude Code tools yay-friend forbids during
+// analysis. A PKGBUILD is untrusted input that may attempt prompt injection, so
+// the model should only read and classify the text we hand it — not execute,
+// write, or fetch anything.
+//
+// NOTE: this is an enumerated deny-list, current as of Claude Code 2.1.x. It is
+// best-effort, not a hard sandbox: a built-in tool added in a future Claude
+// release would not be covered until added here. It is one layer of
+// defense-in-depth alongside headless mode's own permission checks. If Claude
+// Code ever supports an empty allow-list that fails closed, prefer that.
+var deniedTools = []string{
+	"Bash", "Edit", "Write", "NotebookEdit", "Read", "Glob", "Grep",
+	"WebFetch", "WebSearch", "Task", "TodoWrite",
+}
 
 // ClaudeProvider implements the AIProvider interface for Claude Code
 type ClaudeProvider struct {
@@ -115,70 +133,276 @@ func (c *ClaudeProvider) AnalyzePKGBUILDWithOptions(ctx context.Context, pkgInfo
 
 	prompt := c.buildSimpleSecurityPrompt(pkgInfo)
 
-	// Debug: Write the full prompt to see what's being sent
-	os.WriteFile("/tmp/claude-final-prompt.txt", []byte(prompt), 0644)
-
-	// Get or create a dedicated directory for claude executions
+	// Get or create a dedicated directory for claude executions. Running from a
+	// neutral directory keeps claude from auto-discovering a project CLAUDE.md or
+	// polluting other conversation histories.
 	claudeWorkDir := c.getClaudeWorkDir()
 	if err := os.MkdirAll(claudeWorkDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create claude work directory: %w", err)
 	}
-	
-	var output []byte
-	var err error
-	
-	if noSpinner {
-		fmt.Printf("Analyzing with Claude...\n")
-		// No spinner - just run claude directly with --print flag
-		cmd := exec.CommandContext(ctx, c.claudePath, "--print")
-		cmd.Dir = claudeWorkDir // Set working directory to avoid polluting other histories
-		cmd.Stdin = strings.NewReader(prompt)
-		output, err = cmd.Output()
-		fmt.Printf("Analysis complete.\n")
-	} else {
-		fmt.Printf("Analyzing with Claude... ")
 
-		// Start spinner in a goroutine
-		done := make(chan bool)
-		go func() {
-			spinner := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-			i := 0
-			for {
-				select {
-				case <-done:
-					fmt.Printf("\r")
-					return
-				default:
-					fmt.Printf("\rAnalyzing with Claude... %s", spinner[i%len(spinner)])
-					i++
-					time.Sleep(100 * time.Millisecond)
-				}
-			}
-		}()
-
-		// Run claude with the prompt via stdin using --print flag for non-interactive mode
-		cmd := exec.CommandContext(ctx, c.claudePath, "--print")
-		cmd.Dir = claudeWorkDir // Set working directory to avoid polluting other histories
-		cmd.Stdin = strings.NewReader(prompt)
-		output, err = cmd.Output()
-
-		// Stop spinner and clear line
-		done <- true
-		time.Sleep(10 * time.Millisecond) // Give spinner time to clear
-		fmt.Printf("\rAnalyzing with Claude... Complete!\n")
+	// Opt-in prompt dump for debugging, kept out of world-readable /tmp.
+	if os.Getenv("YAYFRIEND_DEBUG") != "" {
+		_ = os.WriteFile(filepath.Join(claudeWorkDir, "last-prompt.txt"), []byte(prompt), 0600)
 	}
-	
+
+	// On an interactive terminal, stream the analysis so the user gets live
+	// progress. When output is piped/redirected or a caller asked for no spinner
+	// (automation, CI), fall back to a single quiet one-shot call.
+	var resultText string
+	var err error
+	if noSpinner || !isTerminal(os.Stdout) {
+		resultText, err = c.runClaudeOneShot(ctx, prompt, claudeWorkDir)
+	} else {
+		resultText, err = c.runClaudeStreaming(ctx, prompt, claudeWorkDir)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("claude analysis failed: %w", err)
+		return nil, err
 	}
 
 	// Parse the response
-	analysis, err := c.parseAnalysisResponse(string(output), pkgInfo)
+	analysis, err := c.parseAnalysisResponse(resultText, pkgInfo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse analysis: %w", err)
 	}
 
 	return analysis, nil
+}
+
+// baseClaudeArgs holds the hardened, isolated flags common to every invocation:
+//   - --model: pinned so analysis is reproducible rather than drifting with the
+//     user's interactive default
+//   - --strict-mcp-config + empty --mcp-config: ignore the user's MCP servers so
+//     analysis can't reach Slack, Google, etc.
+//   - --disallowedTools: deny every built-in tool (see deniedTools)
+//
+// Authentication is intentionally left untouched: this inherits whatever the
+// local `claude` is logged into (subscription OAuth or ANTHROPIC_API_KEY).
+// yay-friend never reads, extracts, or forwards credentials.
+func (c *ClaudeProvider) baseClaudeArgs() []string {
+	return []string{
+		"--model", c.getModel(),
+		"--strict-mcp-config",
+		"--mcp-config", `{"mcpServers":{}}`,
+		"--disallowedTools", strings.Join(deniedTools, ","),
+	}
+}
+
+// runClaudeOneShot runs a single non-interactive analysis and returns the model's
+// text result, unwrapped from the `--output-format json` envelope.
+func (c *ClaudeProvider) runClaudeOneShot(ctx context.Context, prompt, workDir string) (string, error) {
+	args := append([]string{"--print", "--output-format", "json"}, c.baseClaudeArgs()...)
+
+	// Status goes to stderr so stdout stays clean for callers capturing output.
+	fmt.Fprintln(os.Stderr, "Analyzing with Claude...")
+	cmd := exec.CommandContext(ctx, c.claudePath, args...)
+	cmd.Dir = workDir
+	cmd.Stdin = strings.NewReader(prompt)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	output, err := cmd.Output()
+	fmt.Fprintln(os.Stderr, "Analysis complete.")
+
+	if err != nil {
+		if stderr.Len() > 0 {
+			return "", fmt.Errorf("claude analysis failed: %w: %s", err, strings.TrimSpace(stderr.String()))
+		}
+		return "", fmt.Errorf("claude analysis failed: %w", err)
+	}
+	return extractClaudeResult(output)
+}
+
+// runClaudeStreaming runs the analysis with `--output-format stream-json` and
+// renders a live progress line (elapsed time + phase) as newline-delimited JSON
+// events arrive, while capturing the final result event for parsing. stdout and
+// stderr are handled on separate pipes so a chatty stderr can't deadlock reads.
+func (c *ClaudeProvider) runClaudeStreaming(ctx context.Context, prompt, workDir string) (string, error) {
+	args := append([]string{"--print", "--output-format", "stream-json", "--verbose"}, c.baseClaudeArgs()...)
+
+	cmd := exec.CommandContext(ctx, c.claudePath, args...)
+	cmd.Dir = workDir
+	cmd.Stdin = strings.NewReader(prompt)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("failed to open claude output: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("failed to start claude: %w", err)
+	}
+
+	start := time.Now()
+	var mu sync.Mutex
+	phase := "starting"
+
+	// Progress ticker: repaint the elapsed/phase line a few times a second.
+	// wg lets us join the goroutine before printing the final line, so a stale
+	// in-progress repaint can never land after "complete".
+	doneTick := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ticker := time.NewTicker(200 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-doneTick:
+				return
+			case <-ticker.C:
+				mu.Lock()
+				p := phase
+				mu.Unlock()
+				fmt.Printf("\r\033[KAnalyzing with Claude (%ds, %s)…", int(time.Since(start).Seconds()), p)
+			}
+		}
+	}()
+
+	// Read events as they arrive. Use a Reader (not Scanner) so a large result
+	// line can't blow past a fixed token limit. We also accumulate the assistant
+	// message text: it carries the same JSON as the result event, so it's a
+	// fallback if the result event is missing or unparseable (parity with the
+	// one-shot path, which falls back to raw text).
+	var resultEvent *claudeEvent
+	var assistantText strings.Builder
+	reader := bufio.NewReader(stdout)
+	for {
+		line, rerr := reader.ReadString('\n')
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			var ev claudeEvent
+			if json.Unmarshal([]byte(trimmed), &ev) == nil {
+				switch ev.Type {
+				case "assistant":
+					mu.Lock()
+					phase = "receiving"
+					mu.Unlock()
+					for _, block := range ev.Message.Content {
+						if block.Type == "text" {
+							assistantText.WriteString(block.Text)
+						}
+					}
+				case "result":
+					e := ev
+					resultEvent = &e
+				}
+			}
+		}
+		if rerr != nil {
+			break // io.EOF on clean close, or a read error
+		}
+	}
+
+	close(doneTick)
+	wg.Wait()
+	waitErr := cmd.Wait()
+	fmt.Printf("\r\033[KAnalyzing with Claude… complete (%ds).\n", int(time.Since(start).Seconds()))
+
+	if resultEvent != nil {
+		if resultEvent.IsError {
+			msg := resultEvent.Result
+			if msg == "" {
+				msg = resultEvent.Subtype
+			}
+			return "", fmt.Errorf("claude reported an error: %s", msg)
+		}
+		return resultEvent.Result, nil
+	}
+	// No usable result event; fall back to the assistant text if we captured any.
+	if text := strings.TrimSpace(assistantText.String()); text != "" {
+		return text, nil
+	}
+	if waitErr != nil {
+		if stderr.Len() > 0 {
+			return "", fmt.Errorf("claude analysis failed: %w: %s", waitErr, strings.TrimSpace(stderr.String()))
+		}
+		return "", fmt.Errorf("claude analysis failed: %w", waitErr)
+	}
+	return "", fmt.Errorf("claude produced no result event")
+}
+
+// isTerminal reports whether f is an interactive character device (a TTY),
+// as opposed to a pipe or regular file.
+func isTerminal(f *os.File) bool {
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
+}
+
+// getModel returns the configured model alias, or the default.
+func (c *ClaudeProvider) getModel() string {
+	if c.config != nil && c.config.Claude.Model != "" {
+		return c.config.Claude.Model
+	}
+	return config.DefaultClaudeModel
+}
+
+// claudeEvent captures the fields we need from `claude --output-format json`.
+// That format emits either a single result object or (in richer environments) a
+// JSON array of events ending in a result event; extractClaudeResult handles both.
+type claudeEvent struct {
+	Type    string `json:"type"`
+	Subtype string `json:"subtype"`
+	IsError bool   `json:"is_error"`
+	Result  string `json:"result"`
+	// Message is populated only on "assistant" events in the stream-json format;
+	// its text blocks carry the model's output.
+	Message struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	} `json:"message"`
+}
+
+// extractClaudeResult unwraps the JSON envelope from `claude --output-format json`
+// and returns the model's text result. It tolerates three shapes: a JSON array of
+// events, a single result object, or (defensively) raw non-JSON text.
+func extractClaudeResult(output []byte) (string, error) {
+	trimmed := bytes.TrimSpace(output)
+	if len(trimmed) == 0 {
+		return "", fmt.Errorf("claude returned empty output")
+	}
+
+	var result *claudeEvent
+	switch trimmed[0] {
+	case '[':
+		var events []claudeEvent
+		if err := json.Unmarshal(trimmed, &events); err != nil {
+			return "", fmt.Errorf("failed to parse claude event stream: %w", err)
+		}
+		for i := range events {
+			if events[i].Type == "result" {
+				result = &events[i]
+			}
+		}
+	case '{':
+		var ev claudeEvent
+		if err := json.Unmarshal(trimmed, &ev); err != nil {
+			return "", fmt.Errorf("failed to parse claude result: %w", err)
+		}
+		if ev.Type == "result" || ev.Result != "" {
+			result = &ev
+		}
+	default:
+		// Not a JSON envelope (e.g. plain --print text); use as-is.
+		return string(trimmed), nil
+	}
+
+	if result == nil {
+		// No result event found; fall back to raw output so parsing can still try.
+		return string(trimmed), nil
+	}
+	if result.IsError {
+		msg := result.Result
+		if msg == "" {
+			msg = result.Subtype
+		}
+		return "", fmt.Errorf("claude reported an error: %s", msg)
+	}
+	return result.Result, nil
 }
 
 // GetCapabilities returns the provider capabilities

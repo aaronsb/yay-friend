@@ -11,6 +11,11 @@ import (
 	"github.com/aaronsb/yay-friend/internal/types"
 )
 
+// DefaultClaudeModel is the model alias passed to `claude --model` when the
+// user hasn't configured one. "sonnet" resolves to the latest Sonnet: a strong,
+// cost-effective choice for structured PKGBUILD security classification.
+const DefaultClaudeModel = "sonnet"
+
 // getConfigDir returns the XDG-compliant config directory
 func getConfigDir() string {
 	if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
@@ -78,6 +83,11 @@ func Load() (*types.Config, error) {
 		}{
 			Path:  "yay",
 			Flags: []string{},
+		},
+		Claude: struct {
+			Model string `yaml:"model"`
+		}{
+			Model: DefaultClaudeModel,
 		},
 	}
 
@@ -149,6 +159,11 @@ func InitializeConfig() error {
 		}{
 			Path:  "yay",
 			Flags: []string{},
+		},
+		Claude: struct {
+			Model string `yaml:"model"`
+		}{
+			Model: DefaultClaudeModel,
 		},
 	}
 
