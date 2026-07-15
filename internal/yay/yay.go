@@ -76,9 +76,12 @@ func (y *YayClient) InstallPackages(ctx context.Context, operation *types.YayOpe
 	args = append(args, operation.Packages...)
 
 	cmd := exec.CommandContext(ctx, y.yayPath, args...)
-	cmd.Stdout = nil // Let it inherit our stdout for interactive behavior
-	cmd.Stderr = nil // Let it inherit our stderr
-	cmd.Stdin = nil  // Let it inherit our stdin
+	// Wire yay directly to our terminal so it can run interactively — sudo
+	// password, PKGBUILD review, and confirmation prompts. (In os/exec, a nil
+	// std stream means /dev/null, not "inherit"; we must assign os.Std* here.)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 
 	return cmd.Run()
 }
