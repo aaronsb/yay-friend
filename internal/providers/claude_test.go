@@ -1,6 +1,38 @@
 package providers
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/aaronsb/yay-friend/internal/types"
+)
+
+func TestBuildPromptInjectsPrescan(t *testing.T) {
+	c := NewClaudeProvider()
+	pkg := types.PackageInfo{
+		Name:     "x",
+		PKGBUILD: `build(){ echo "TWFsaWNpb3VzUGF5bG9hZFdpdGhIaWdoRW50cm9weTEyMzQ1" | base64 -d | sh; }`,
+	}
+	prompt := c.buildSimpleSecurityPrompt(pkg)
+	if !strings.Contains(prompt, "<static_prescan>") {
+		t.Fatal("generated prompt is missing the static_prescan block")
+	}
+	if !strings.Contains(prompt, "unexplained_entropy") {
+		t.Errorf("pre-scan did not flag the planted payload in the prompt:\n%s", prompt)
+	}
+}
+
+func TestBuildPromptCleanPackageNoFlag(t *testing.T) {
+	c := NewClaudeProvider()
+	pkg := types.PackageInfo{
+		Name:     "hello",
+		PKGBUILD: "source=('x.tar.gz')\nsha256sums=('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')",
+	}
+	prompt := c.buildSimpleSecurityPrompt(pkg)
+	if !strings.Contains(prompt, "No anomalies") {
+		t.Errorf("clean package should pre-scan clean; prompt:\n%s", prompt)
+	}
+}
 
 func TestExtractClaudeResult(t *testing.T) {
 	tests := []struct {
