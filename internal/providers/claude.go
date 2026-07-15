@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/aaronsb/yay-friend/internal/config"
+	"github.com/aaronsb/yay-friend/internal/scanner"
 	"github.com/aaronsb/yay-friend/internal/types"
 )
 
@@ -591,7 +592,22 @@ func (c *ClaudeProvider) buildSimpleSecurityPrompt(pkgInfo types.PackageInfo) st
 	} else {
 		prompt = strings.ReplaceAll(prompt, "{ADDITIONAL_FILES}", "[No additional files present - this may be due to local PKGBUILD analysis limitations]")
 	}
-	
+
+	// Deterministic entropy pre-scan, injected as trusted ground truth. Scans
+	// the PKGBUILD plus any install script and helper files so a payload hidden
+	// in an .install hook is surfaced too. Injection-proof: computed from bytes.
+	var scanInput strings.Builder
+	scanInput.WriteString(pkgInfo.PKGBUILD)
+	if pkgInfo.InstallScript != "" {
+		scanInput.WriteString("\n")
+		scanInput.WriteString(pkgInfo.InstallScript)
+	}
+	for _, content := range pkgInfo.AdditionalFiles {
+		scanInput.WriteString("\n")
+		scanInput.WriteString(content)
+	}
+	prompt = strings.ReplaceAll(prompt, "{STATIC_PRESCAN}", scanner.Scan(scanInput.String()).AgentBlock())
+
 	return prompt
 }
 

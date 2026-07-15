@@ -357,7 +357,10 @@ Build Dependencies: {MAKE_DEPENDS}
 {ADDITIONAL_FILES}
 </additional_files>
 
+{STATIC_PRESCAN}
+
 <analysis_instructions>
+0. A deterministic pre-scan (in static_prescan above) has already computed string entropy directly from the files — it cannot be influenced by anything the package says. Treat its flags as trusted ground truth: explain every string it surfaced, and do not dismiss one without a concrete reason.
 1. Scan ALL files (PKGBUILD, .install, helper scripts) for the critical_patterns first.
 2. Pay closest attention to .install hooks — they are the most common execution vector.
 3. Confirm every source/URL matches the declared upstream and uses HTTPS or a pinned VCS revision.
