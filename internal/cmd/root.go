@@ -3,8 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/gookit/color"
@@ -17,21 +15,6 @@ import (
 	"github.com/aaronsb/yay-friend/internal/types"
 	"github.com/aaronsb/yay-friend/internal/yay"
 )
-
-// getConfigDir returns the XDG-compliant config directory
-func getConfigDir() string {
-	if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
-		return filepath.Join(xdgConfig, "yay-friend")
-	}
-	
-	home, err := os.UserHomeDir()
-	if err != nil {
-		// Fallback to current directory if we can't determine home
-		return ".yay-friend"
-	}
-	
-	return filepath.Join(home, ".config", "yay-friend")
-}
 
 var (
 	cfgFile      string
@@ -77,7 +60,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&skipAnalysis, "skip-analysis", false, "skip security analysis and proceed directly to yay")
 	rootCmd.PersistentFlags().StringVar(&provider, "provider", "", "AI provider to use (claude, qwen, copilot, goose)")
 	rootCmd.PersistentFlags().BoolVar(&noSpinner, "no-spinner", false, "disable spinner animations (useful for scripts/automation)")
-	
+
 	// Add yay-compatible flags
 	rootCmd.Flags().BoolP("sync", "S", false, "install packages")
 	rootCmd.Flags().BoolP("remove", "R", false, "remove packages")
@@ -101,17 +84,17 @@ func initConfig() {
 	config.SetConfigPath(cfgFile)
 }
 
-// runInstall handles the main package installation workflow  
+// runInstall handles the main package installation workflow
 func runInstall(ctx context.Context, args []string) error {
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
-	
+
 	// Debug config loading - only show in verbose mode
 	if verbose {
-		fmt.Printf("Config Debug - Default Provider: %s, Block Level: %d, Warn Level: %d\n", 
+		fmt.Printf("Config Debug - Default Provider: %s, Block Level: %d, Warn Level: %d\n",
 			cfg.DefaultProvider, int(cfg.SecurityThresholds.BlockLevel), int(cfg.SecurityThresholds.WarnLevel))
 	}
 
@@ -149,35 +132,35 @@ func runInstall(ctx context.Context, args []string) error {
 		if err != nil {
 			// Package not found directly, might be a search query
 			fmt.Printf("🔍 Package '%s' not found exactly, searching...\n", pkg)
-			
+
 			// Search for packages
 			searchResults, searchErr := yayClient.SearchPackages(ctx, pkg)
 			if searchErr != nil {
 				return fmt.Errorf("search failed for '%s': %w", pkg, searchErr)
 			}
-			
+
 			if len(searchResults) == 0 {
 				return fmt.Errorf("no packages found matching '%s'", pkg)
 			}
-			
+
 			// Present selection to user
 			selectedPkgs, selectErr := presentPackageSelection(searchResults)
 			if selectErr != nil {
 				return selectErr
 			}
-			
+
 			if len(selectedPkgs) == 0 {
 				fmt.Println("Selection cancelled")
 				return nil
 			}
-			
+
 			finalPackages = append(finalPackages, selectedPkgs...)
 		} else {
 			// Package found directly
 			finalPackages = append(finalPackages, pkg)
 		}
 	}
-	
+
 	// Update operation with final package list
 	operation.Packages = finalPackages
 
@@ -265,7 +248,7 @@ func analyzeAndDecide(ctx context.Context, yayClient *yay.YayClient, provider ty
 	if err := aurFetcher.EnrichPackageInfo(ctx, pkgInfo); err != nil {
 		fmt.Printf("Warning: Could not enrich with AUR context: %v\n", err)
 	} else {
-		fmt.Printf("AUR context: %d votes, %.3f popularity, %d comments\n", 
+		fmt.Printf("AUR context: %d votes, %.3f popularity, %d comments\n",
 			pkgInfo.Votes, pkgInfo.Popularity, len(pkgInfo.Comments))
 	}
 
@@ -301,7 +284,7 @@ func analyzeAndDecide(ctx context.Context, yayClient *yay.YayClient, provider ty
 		} else {
 			analysis, err = provider.AnalyzePKGBUILD(ctx, *pkgInfo)
 		}
-		
+
 		if err != nil {
 			return err
 		}
@@ -325,21 +308,21 @@ func handleAnalysisResult(analysis *types.SecurityAnalysis, cfg *types.Config) e
 	color.Bold.Print("Security Analysis Results: ")
 	color.Magenta.Printf("%s\n", analysis.PackageName)
 	fmt.Printf(strings.Repeat("=", 60) + "\n")
-	
+
 	// Display entropy level with color coding
 	entropyIcon := getEntropyIcon(analysis.OverallLevel)
 	fmt.Printf("Security Entropy: %s %s\n", entropyIcon, analysis.OverallLevel.String())
-	
+
 	if analysis.PredictabilityScore > 0 {
 		fmt.Printf("Predictability Score: %.2f/1.0\n", analysis.PredictabilityScore)
 	}
-	
+
 	if len(analysis.EntropyFactors) > 0 {
 		fmt.Printf("Risk Factors: %s\n", strings.Join(analysis.EntropyFactors, ", "))
 	}
-	
+
 	fmt.Printf("Summary: %s\n", analysis.Summary)
-	
+
 	// Show educational content
 	if analysis.EducationalSummary != "" {
 		fmt.Printf("\n")
@@ -358,7 +341,7 @@ func handleAnalysisResult(analysis *types.SecurityAnalysis, cfg *types.Config) e
 
 	// Debug threshold comparison (only show if verbose mode)
 	if verbose {
-		fmt.Printf("\nDebug - Analysis Level: %d (%s), Block Threshold: %d (%s), Warn Threshold: %d (%s)\n", 
+		fmt.Printf("\nDebug - Analysis Level: %d (%s), Block Threshold: %d (%s), Warn Threshold: %d (%s)\n",
 			int(analysis.OverallLevel), analysis.OverallLevel.String(),
 			int(cfg.SecurityThresholds.BlockLevel), cfg.SecurityThresholds.BlockLevel.String(),
 			int(cfg.SecurityThresholds.WarnLevel), cfg.SecurityThresholds.WarnLevel.String())
@@ -366,7 +349,7 @@ func handleAnalysisResult(analysis *types.SecurityAnalysis, cfg *types.Config) e
 
 	// Check against thresholds
 	if analysis.OverallLevel >= cfg.SecurityThresholds.BlockLevel {
-		fmt.Printf("\nBLOCKED: Package security level (%s) exceeds block threshold (%s)\n", 
+		fmt.Printf("\nBLOCKED: Package security level (%s) exceeds block threshold (%s)\n",
 			analysis.OverallLevel.String(), cfg.SecurityThresholds.BlockLevel.String())
 		return fmt.Errorf("package %s blocked by security policy", analysis.PackageName)
 	}
@@ -383,19 +366,19 @@ func handleAnalysisResult(analysis *types.SecurityAnalysis, cfg *types.Config) e
 			entropyColor.Printf("[%s] ", finding.Entropy.String())
 			fmt.Printf("%s\n", finding.Type)
 			fmt.Printf("   Description: %s\n", finding.Description)
-			
+
 			if finding.Context != "" {
 				fmt.Printf("   Code: %s\n", finding.Context)
 			}
-			
+
 			if finding.EntropyNotes != "" {
 				fmt.Printf("   Analysis: %s\n", finding.EntropyNotes)
 			}
-			
+
 			if finding.Suggestion != "" {
 				fmt.Printf("   Action: %s\n", finding.Suggestion)
 			}
-			
+
 			if finding.LineNumber > 0 {
 				fmt.Printf("   Line: %d\n", finding.LineNumber)
 			}
@@ -462,41 +445,41 @@ func displayCollectedData(pkgInfo *types.PackageInfo) {
 	fmt.Printf("\n")
 	color.Bold.Printf("Collected for Analysis:\n")
 	fmt.Printf("─────────────────────────\n")
-	
+
 	// PKGBUILD stats
 	pkgbuildLines := len(strings.Split(pkgInfo.PKGBUILD, "\n"))
 	fmt.Printf("• PKGBUILD: %d lines of shell script\n", pkgbuildLines)
-	
+
 	// Package metadata
 	fmt.Printf("• Package metadata: %s v%s by %s\n", pkgInfo.Name, pkgInfo.Version, pkgInfo.Maintainer)
-	
+
 	// Dependencies
 	if len(pkgInfo.Dependencies) > 0 {
-		fmt.Printf("• Runtime dependencies: %d packages (%s)\n", 
+		fmt.Printf("• Runtime dependencies: %d packages (%s)\n",
 			len(pkgInfo.Dependencies), truncateList(pkgInfo.Dependencies, 3))
 	}
 	if len(pkgInfo.MakeDepends) > 0 {
-		fmt.Printf("• Build dependencies: %d packages (%s)\n", 
+		fmt.Printf("• Build dependencies: %d packages (%s)\n",
 			len(pkgInfo.MakeDepends), truncateList(pkgInfo.MakeDepends, 3))
 	}
-	
+
 	// AUR history
 	if pkgInfo.FirstSubmitted != "" && pkgInfo.LastUpdated != "" {
-		fmt.Printf("• AUR history: submitted %s, last updated %s\n", 
+		fmt.Printf("• AUR history: submitted %s, last updated %s\n",
 			pkgInfo.FirstSubmitted, pkgInfo.LastUpdated)
 	}
-	
+
 	// Community engagement
 	if pkgInfo.Votes > 0 || pkgInfo.Popularity > 0 {
-		fmt.Printf("• Community: %d votes, %.3f popularity score\n", 
-			pkgInfo.Votes, pkgInfo.Popularity) 
+		fmt.Printf("• Community: %d votes, %.3f popularity score\n",
+			pkgInfo.Votes, pkgInfo.Popularity)
 	}
-	
+
 	// Optional dependencies
 	if len(pkgInfo.OptDepends) > 0 {
 		fmt.Printf("• Optional dependencies: %d packages\n", len(pkgInfo.OptDepends))
 	}
-	
+
 	fmt.Printf("\n")
 }
 

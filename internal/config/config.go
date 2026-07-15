@@ -1,9 +1,12 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -21,13 +24,13 @@ func getConfigDir() string {
 	if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
 		return filepath.Join(xdgConfig, "yay-friend")
 	}
-	
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		// Fallback to current directory if we can't determine home
 		return ".yay-friend"
 	}
-	
+
 	return filepath.Join(home, ".config", "yay-friend")
 }
 
@@ -107,15 +110,27 @@ func Load() (*types.Config, error) {
 }
 
 // Set applies a single dotted-key change (e.g. "claude.model") to the config
-// file and persists it. The file is created with defaults first if it does not
-// exist. The value is parsed as YAML so that scalars get their natural type
-// (`false` -> bool, `90` -> int) rather than being stored as strings. The result
-// is validated before it is written, so an invalid change never lands on disk.
+// file and persists it. It handles scalar values: the value becomes an int or
+// bool when it cleanly parses as one, otherwise it stays a string — so a model
+// alias like "opus" stays a string and a stray "1.2" into an int field is
+// rejected rather than silently truncated. To set list/complex values, edit the
+// file directly.
+//
+// The file is created with defaults (at the resolved --config path) if it does
+// not exist. The result is validated — unknown/typo'd keys and type mismatches
+// are rejected — before it is written, so an invalid change never lands on disk.
 func Set(key, value string) error {
-	path := configFilePath()
+	if strings.TrimSpace(key) == "" {
+		return fmt.Errorf("config key must not be empty")
+	}
+	keys := strings.Split(key, ".")
+	if slices.Contains(keys, "") {
+		return fmt.Errorf("invalid config key %q: empty path segment", key)
+	}
 
+	path := configFilePath()
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		if err := InitializeConfig(); err != nil {
+		if err := writeDefaultConfigFile(path); err != nil {
 			return err
 		}
 	}
@@ -130,12 +145,7 @@ func Set(key, value string) error {
 		return fmt.Errorf("failed to parse config file %s: %w", path, err)
 	}
 
-	var parsed any
-	if err := yaml.Unmarshal([]byte(value), &parsed); err != nil {
-		parsed = value // fall back to the raw string
-	}
-
-	if err := setNested(root, strings.Split(key, "."), parsed); err != nil {
+	if err := setNested(root, keys, parseScalar(value)); err != nil {
 		return err
 	}
 
@@ -144,9 +154,12 @@ func Set(key, value string) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	// Validate the result against the typed schema before persisting.
+	// Validate against the typed schema before persisting. KnownFields rejects
+	// unknown/typo'd keys; Decode rejects type mismatches.
 	check := defaultConfig()
-	if err := yaml.Unmarshal(out, check); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(out))
+	dec.KnownFields(true)
+	if err := dec.Decode(check); err != nil {
 		return fmt.Errorf("resulting config would be invalid: %w", err)
 	}
 	if err := validateConfig(check); err != nil {
@@ -154,6 +167,38 @@ func Set(key, value string) error {
 	}
 
 	if err := os.WriteFile(path, out, 0644); err != nil {
+		return fmt.Errorf("failed to write config file %s: %w", path, err)
+	}
+	return nil
+}
+
+// parseScalar interprets a CLI-provided value as an int or bool when it cleanly
+// is one, otherwise returns it unchanged as a string. Int is tried before bool
+// so "1" stays an int rather than becoming true. Floats, dates, and other shapes
+// stay strings, which the typed-schema validation then accepts or rejects per
+// field — avoiding silent float->int truncation or timestamp coercion.
+func parseScalar(s string) any {
+	if i, err := strconv.Atoi(s); err == nil {
+		return i
+	}
+	if b, err := strconv.ParseBool(s); err == nil {
+		return b
+	}
+	return s
+}
+
+// writeDefaultConfigFile writes the built-in defaults to path, creating parent
+// directories as needed. Unlike InitializeConfig it is quiet and honors the
+// exact path (used by Set to bootstrap a missing file).
+func writeDefaultConfigFile(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+	data, err := yaml.Marshal(defaultConfig())
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("failed to write config file %s: %w", path, err)
 	}
 	return nil
@@ -182,30 +227,20 @@ func setNested(m map[string]any, keys []string, value any) error {
 	return nil
 }
 
-// InitializeConfig creates a default configuration directory and file
+// InitializeConfig creates a default configuration directory and file at the
+// resolved config path (honoring --config).
 func InitializeConfig() error {
-	configDir := getConfigDir()
-	configPath := filepath.Join(configDir, "config.yaml")
+	configPath := configFilePath()
+	configDir := filepath.Dir(configPath)
 
-	// Create config directory if it doesn't exist
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		return fmt.Errorf("failed to create config directory: %w", err)
-	}
-
-	// Check if config already exists and inform user
+	// Inform the user if we're about to overwrite an existing config.
 	if _, err := os.Stat(configPath); err == nil {
 		fmt.Printf("Configuration file already exists at %s\n", configPath)
 		fmt.Println("Overwriting with default configuration...")
 	}
 
-	// Write to file
-	data, err := yaml.Marshal(defaultConfig())
-	if err != nil {
-		return fmt.Errorf("failed to marshal config: %w", err)
-	}
-
-	if err := os.WriteFile(configPath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
+	if err := writeDefaultConfigFile(configPath); err != nil {
+		return err
 	}
 
 	// Create subdirectories for provider configs, cache, etc.
@@ -244,6 +279,19 @@ func validateConfig(cfg *types.Config) error {
 
 	if cfg.SecurityThresholds.WarnLevel < types.SecuritySafe || cfg.SecurityThresholds.WarnLevel > types.SecurityCritical {
 		return fmt.Errorf("invalid warn level: %d", cfg.SecurityThresholds.WarnLevel)
+	}
+
+	// Validate cache bounds
+	if cfg.Cache.MaxAgeDays < 0 {
+		return fmt.Errorf("cache.max_age_days must be >= 0, got %d", cfg.Cache.MaxAgeDays)
+	}
+	if cfg.Cache.MaxSizeMB < 0 {
+		return fmt.Errorf("cache.max_size_mb must be >= 0, got %d", cfg.Cache.MaxSizeMB)
+	}
+
+	// yay must be invocable
+	if strings.TrimSpace(cfg.Yay.Path) == "" {
+		return fmt.Errorf("yay.path must not be empty")
 	}
 
 	return nil
