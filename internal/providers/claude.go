@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aaronsb/yay-friend/internal/config"
@@ -138,64 +140,16 @@ func (c *ClaudeProvider) AnalyzePKGBUILDWithOptions(ctx context.Context, pkgInfo
 		_ = os.WriteFile(filepath.Join(claudeWorkDir, "last-prompt.txt"), []byte(prompt), 0600)
 	}
 
-	args := c.buildClaudeArgs()
-
-	var output []byte
-	var stderr bytes.Buffer
+	// On an interactive terminal, stream the analysis so the user gets live
+	// progress. When output is piped/redirected or a caller asked for no spinner
+	// (automation, CI), fall back to a single quiet one-shot call.
+	var resultText string
 	var err error
-
-	runClaude := func() {
-		cmd := exec.CommandContext(ctx, c.claudePath, args...)
-		cmd.Dir = claudeWorkDir // neutral working directory; see above
-		cmd.Stdin = strings.NewReader(prompt)
-		cmd.Stderr = &stderr
-		output, err = cmd.Output()
-	}
-
-	// Only animate the spinner on an interactive terminal; when output is piped
-	// or redirected (automation, CI), the \r-based spinner just spams lines.
 	if noSpinner || !isTerminal(os.Stdout) {
-		fmt.Printf("Analyzing with Claude...\n")
-		runClaude()
-		fmt.Printf("Analysis complete.\n")
+		resultText, err = c.runClaudeOneShot(ctx, prompt, claudeWorkDir)
 	} else {
-		fmt.Printf("Analyzing with Claude... ")
-
-		// Start spinner in a goroutine
-		done := make(chan bool)
-		go func() {
-			spinner := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-			i := 0
-			for {
-				select {
-				case <-done:
-					fmt.Printf("\r")
-					return
-				default:
-					fmt.Printf("\rAnalyzing with Claude... %s", spinner[i%len(spinner)])
-					i++
-					time.Sleep(100 * time.Millisecond)
-				}
-			}
-		}()
-
-		runClaude()
-
-		// Stop spinner and clear line
-		done <- true
-		time.Sleep(10 * time.Millisecond) // Give spinner time to clear
-		fmt.Printf("\rAnalyzing with Claude... Complete!\n")
+		resultText, err = c.runClaudeStreaming(ctx, prompt, claudeWorkDir)
 	}
-
-	if err != nil {
-		if stderr.Len() > 0 {
-			return nil, fmt.Errorf("claude analysis failed: %w: %s", err, strings.TrimSpace(stderr.String()))
-		}
-		return nil, fmt.Errorf("claude analysis failed: %w", err)
-	}
-
-	// Unwrap the structured JSON envelope to the model's text result.
-	resultText, err := extractClaudeResult(output)
 	if err != nil {
 		return nil, err
 	}
@@ -209,9 +163,7 @@ func (c *ClaudeProvider) AnalyzePKGBUILDWithOptions(ctx context.Context, pkgInfo
 	return analysis, nil
 }
 
-// buildClaudeArgs assembles the flags for a hardened, isolated headless call.
-// The invocation is deliberately minimal and locked down:
-//   - --print / --output-format json: non-interactive, structured envelope
+// baseClaudeArgs holds the hardened, isolated flags common to every invocation:
 //   - --model: pinned so analysis is reproducible rather than drifting with the
 //     user's interactive default
 //   - --strict-mcp-config + empty --mcp-config: ignore the user's MCP servers so
@@ -221,15 +173,126 @@ func (c *ClaudeProvider) AnalyzePKGBUILDWithOptions(ctx context.Context, pkgInfo
 // Authentication is intentionally left untouched: this inherits whatever the
 // local `claude` is logged into (subscription OAuth or ANTHROPIC_API_KEY).
 // yay-friend never reads, extracts, or forwards credentials.
-func (c *ClaudeProvider) buildClaudeArgs() []string {
+func (c *ClaudeProvider) baseClaudeArgs() []string {
 	return []string{
-		"--print",
-		"--output-format", "json",
 		"--model", c.getModel(),
 		"--strict-mcp-config",
 		"--mcp-config", `{"mcpServers":{}}`,
 		"--disallowedTools", strings.Join(deniedTools, ","),
 	}
+}
+
+// runClaudeOneShot runs a single non-interactive analysis and returns the model's
+// text result, unwrapped from the `--output-format json` envelope.
+func (c *ClaudeProvider) runClaudeOneShot(ctx context.Context, prompt, workDir string) (string, error) {
+	args := append([]string{"--print", "--output-format", "json"}, c.baseClaudeArgs()...)
+
+	fmt.Println("Analyzing with Claude...")
+	cmd := exec.CommandContext(ctx, c.claudePath, args...)
+	cmd.Dir = workDir
+	cmd.Stdin = strings.NewReader(prompt)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	output, err := cmd.Output()
+	fmt.Println("Analysis complete.")
+
+	if err != nil {
+		if stderr.Len() > 0 {
+			return "", fmt.Errorf("claude analysis failed: %w: %s", err, strings.TrimSpace(stderr.String()))
+		}
+		return "", fmt.Errorf("claude analysis failed: %w", err)
+	}
+	return extractClaudeResult(output)
+}
+
+// runClaudeStreaming runs the analysis with `--output-format stream-json` and
+// renders a live progress line (elapsed time + phase) as newline-delimited JSON
+// events arrive, while capturing the final result event for parsing. stdout and
+// stderr are handled on separate pipes so a chatty stderr can't deadlock reads.
+func (c *ClaudeProvider) runClaudeStreaming(ctx context.Context, prompt, workDir string) (string, error) {
+	args := append([]string{"--print", "--output-format", "stream-json", "--verbose"}, c.baseClaudeArgs()...)
+
+	cmd := exec.CommandContext(ctx, c.claudePath, args...)
+	cmd.Dir = workDir
+	cmd.Stdin = strings.NewReader(prompt)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("failed to open claude output: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("failed to start claude: %w", err)
+	}
+
+	start := time.Now()
+	var mu sync.Mutex
+	phase := "starting"
+
+	// Progress ticker: repaint the elapsed/phase line a few times a second.
+	doneTick := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(200 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-doneTick:
+				return
+			case <-ticker.C:
+				mu.Lock()
+				p := phase
+				mu.Unlock()
+				fmt.Printf("\r\033[KAnalyzing with Claude (%ds, %s)…", int(time.Since(start).Seconds()), p)
+			}
+		}
+	}()
+
+	// Read events as they arrive. Use a Reader (not Scanner) so a large result
+	// line can't blow past a fixed token limit.
+	var resultEvent *claudeEvent
+	reader := bufio.NewReader(stdout)
+	for {
+		line, rerr := reader.ReadString('\n')
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			var ev claudeEvent
+			if json.Unmarshal([]byte(trimmed), &ev) == nil {
+				switch ev.Type {
+				case "assistant":
+					mu.Lock()
+					phase = "receiving"
+					mu.Unlock()
+				case "result":
+					e := ev
+					resultEvent = &e
+				}
+			}
+		}
+		if rerr != nil {
+			break // io.EOF on clean close, or a read error
+		}
+	}
+
+	close(doneTick)
+	waitErr := cmd.Wait()
+	fmt.Printf("\r\033[KAnalyzing with Claude… complete (%ds).\n", int(time.Since(start).Seconds()))
+
+	if resultEvent != nil {
+		if resultEvent.IsError {
+			msg := resultEvent.Result
+			if msg == "" {
+				msg = resultEvent.Subtype
+			}
+			return "", fmt.Errorf("claude reported an error: %s", msg)
+		}
+		return resultEvent.Result, nil
+	}
+	if waitErr != nil {
+		if stderr.Len() > 0 {
+			return "", fmt.Errorf("claude analysis failed: %w: %s", waitErr, strings.TrimSpace(stderr.String()))
+		}
+		return "", fmt.Errorf("claude analysis failed: %w", waitErr)
+	}
+	return "", fmt.Errorf("claude produced no result event")
 }
 
 // isTerminal reports whether f is an interactive character device (a TTY),
