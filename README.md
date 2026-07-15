@@ -310,7 +310,11 @@ claude:
                  # your interactive default. Defaults to "sonnet" if unset.
 ```
 
-> **Note:** config-file *loading* is not wired up yet ([#5](https://github.com/aaronsb/yay-friend/issues/5)) — the tool currently runs on the built-in defaults above (model `sonnet`, default prompt). Editing `config.yaml` (including `claude.model` and the prompt template) won't take effect until that lands. Everything documented here reflects those defaults.
+> **Note:** `config.yaml` is loaded as an **overlay** on the built-in defaults — set
+> only the keys you want to change; anything you omit keeps its default. Change values
+> with `yay-friend config set <key> <value>` (dotted keys, e.g. `config set claude.model opus`,
+> `config set cache.enabled false`) or by editing the file directly. Invalid values are
+> validated and rejected before they're written.
 
 ## 🧪 Development & Testing
 

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
-	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
 
 	"github.com/aaronsb/yay-friend/internal/types"
@@ -31,10 +31,27 @@ func getConfigDir() string {
 	return filepath.Join(home, ".config", "yay-friend")
 }
 
-// Load loads the configuration from file
-func Load() (*types.Config, error) {
-	// For now, return hardcoded sensible defaults to get the tool working
-	// TODO: Implement proper YAML config loading later
+// configFileOverride, when set via SetConfigPath (from the --config flag),
+// takes precedence over the default config path.
+var configFileOverride string
+
+// SetConfigPath overrides the config file location that Load reads from.
+// An empty path clears the override.
+func SetConfigPath(path string) {
+	configFileOverride = path
+}
+
+// configFilePath returns the config file Load should read.
+func configFilePath() string {
+	if configFileOverride != "" {
+		return configFileOverride
+	}
+	return filepath.Join(getConfigDir(), "config.yaml")
+}
+
+// defaultConfig returns the built-in configuration. It is both the config used
+// when no file exists and the base that a user's config.yaml is overlaid onto.
+func defaultConfig() *types.Config {
 	cfg := &types.Config{
 		DefaultProvider: "claude",
 		Providers: map[string]string{
@@ -43,55 +60,126 @@ func Load() (*types.Config, error) {
 			"copilot": "",
 			"goose":   "",
 		},
-		SecurityThresholds: struct {
-			BlockLevel  types.SecurityLevel `yaml:"block_level"`
-			WarnLevel   types.SecurityLevel `yaml:"warn_level"`
-			AutoProceed bool                `yaml:"auto_proceed_safe"`
-		}{
-			BlockLevel:  types.SecurityCritical, // Only block CRITICAL
-			WarnLevel:   types.SecurityMedium,   // Warn on MODERATE and above
-			AutoProceed: false,
-		},
-		Cache: struct {
-			Enabled      bool `yaml:"enabled"`
-			MaxAgeDays   int  `yaml:"max_age_days"`
-			MaxSizeMB    int  `yaml:"max_size_mb"`
-			Compress     bool `yaml:"compress"`
-		}{
-			Enabled:      true,
-			MaxAgeDays:   90,
-			MaxSizeMB:    100,
-			Compress:     false,
-		},
-		Prompts: struct {
-			SecurityAnalysis string `yaml:"security_analysis"`
-		}{
-			SecurityAnalysis: GetDefaultSecurityPrompt(),
-		},
-		UI: struct {
-			ShowDetails   bool `yaml:"show_details"`
-			UseColors     bool `yaml:"use_colors"`
-			VerboseOutput bool `yaml:"verbose_output"`
-		}{
-			ShowDetails:   true,
-			UseColors:     true,
-			VerboseOutput: false,
-		},
-		Yay: struct {
-			Path  string   `yaml:"path"`
-			Flags []string `yaml:"default_flags"`
-		}{
-			Path:  "yay",
-			Flags: []string{},
-		},
-		Claude: struct {
-			Model string `yaml:"model"`
-		}{
-			Model: DefaultClaudeModel,
-		},
+	}
+	cfg.SecurityThresholds.BlockLevel = types.SecurityCritical // Only block CRITICAL
+	cfg.SecurityThresholds.WarnLevel = types.SecurityMedium    // Warn on MODERATE and above
+	cfg.SecurityThresholds.AutoProceed = false
+	cfg.Cache.Enabled = true
+	cfg.Cache.MaxAgeDays = 90
+	cfg.Cache.MaxSizeMB = 100
+	cfg.Cache.Compress = false
+	cfg.Prompts.SecurityAnalysis = GetDefaultSecurityPrompt()
+	cfg.UI.ShowDetails = true
+	cfg.UI.UseColors = true
+	cfg.UI.VerboseOutput = false
+	cfg.Yay.Path = "yay"
+	cfg.Yay.Flags = []string{}
+	cfg.Claude.Model = DefaultClaudeModel
+	return cfg
+}
+
+// Load builds the default configuration and overlays the user's config.yaml
+// (if present) on top of it, then validates the result. When no config file
+// exists, the built-in defaults are authoritative.
+func Load() (*types.Config, error) {
+	cfg := defaultConfig()
+
+	path := configFilePath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return cfg, nil
+		}
+		return nil, fmt.Errorf("failed to read config file %s: %w", path, err)
+	}
+
+	// Overlay: fields present in the file override defaults; absent fields keep
+	// their default. The struct's yaml tags drive the mapping.
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse config file %s: %w", path, err)
+	}
+
+	if err := validateConfig(cfg); err != nil {
+		return nil, fmt.Errorf("invalid config in %s: %w", path, err)
 	}
 
 	return cfg, nil
+}
+
+// Set applies a single dotted-key change (e.g. "claude.model") to the config
+// file and persists it. The file is created with defaults first if it does not
+// exist. The value is parsed as YAML so that scalars get their natural type
+// (`false` -> bool, `90` -> int) rather than being stored as strings. The result
+// is validated before it is written, so an invalid change never lands on disk.
+func Set(key, value string) error {
+	path := configFilePath()
+
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		if err := InitializeConfig(); err != nil {
+			return err
+		}
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("failed to read config file %s: %w", path, err)
+	}
+
+	root := map[string]any{}
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return fmt.Errorf("failed to parse config file %s: %w", path, err)
+	}
+
+	var parsed any
+	if err := yaml.Unmarshal([]byte(value), &parsed); err != nil {
+		parsed = value // fall back to the raw string
+	}
+
+	if err := setNested(root, strings.Split(key, "."), parsed); err != nil {
+		return err
+	}
+
+	out, err := yaml.Marshal(root)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	// Validate the result against the typed schema before persisting.
+	check := defaultConfig()
+	if err := yaml.Unmarshal(out, check); err != nil {
+		return fmt.Errorf("resulting config would be invalid: %w", err)
+	}
+	if err := validateConfig(check); err != nil {
+		return fmt.Errorf("resulting config would be invalid: %w", err)
+	}
+
+	if err := os.WriteFile(path, out, 0644); err != nil {
+		return fmt.Errorf("failed to write config file %s: %w", path, err)
+	}
+	return nil
+}
+
+// setNested walks (creating as needed) nested maps to set a dotted key path.
+func setNested(m map[string]any, keys []string, value any) error {
+	for i, k := range keys {
+		if i == len(keys)-1 {
+			m[k] = value
+			return nil
+		}
+		child, ok := m[k]
+		if !ok {
+			next := map[string]any{}
+			m[k] = next
+			m = next
+			continue
+		}
+		childMap, ok := child.(map[string]any)
+		if !ok {
+			return fmt.Errorf("cannot set %q: %q is not a section", strings.Join(keys, "."), k)
+		}
+		m = childMap
+	}
+	return nil
 }
 
 // InitializeConfig creates a default configuration directory and file
@@ -110,65 +198,8 @@ func InitializeConfig() error {
 		fmt.Println("Overwriting with default configuration...")
 	}
 
-	// Create default config
-	defaultConfig := &types.Config{
-		DefaultProvider: "claude",
-		Providers: map[string]string{
-			"claude":  "",
-			"qwen":    "",
-			"copilot": "",
-			"goose":   "",
-		},
-		SecurityThresholds: struct {
-			BlockLevel  types.SecurityLevel `yaml:"block_level"`
-			WarnLevel   types.SecurityLevel `yaml:"warn_level"`
-			AutoProceed bool                `yaml:"auto_proceed_safe"`
-		}{
-			BlockLevel:  types.SecurityCritical,
-			WarnLevel:   types.SecurityMedium,
-			AutoProceed: false,
-		},
-		Cache: struct {
-			Enabled      bool `yaml:"enabled"`
-			MaxAgeDays   int  `yaml:"max_age_days"`
-			MaxSizeMB    int  `yaml:"max_size_mb"`
-			Compress     bool `yaml:"compress"`
-		}{
-			Enabled:      true,
-			MaxAgeDays:   90,
-			MaxSizeMB:    100,
-			Compress:     false,
-		},
-		Prompts: struct {
-			SecurityAnalysis string `yaml:"security_analysis"`
-		}{
-			SecurityAnalysis: GetDefaultSecurityPrompt(),
-		},
-		UI: struct {
-			ShowDetails   bool `yaml:"show_details"`
-			UseColors     bool `yaml:"use_colors"`
-			VerboseOutput bool `yaml:"verbose_output"`
-		}{
-			ShowDetails:   true,
-			UseColors:     true,
-			VerboseOutput: false,
-		},
-		Yay: struct {
-			Path  string   `yaml:"path"`
-			Flags []string `yaml:"default_flags"`
-		}{
-			Path:  "yay",
-			Flags: []string{},
-		},
-		Claude: struct {
-			Model string `yaml:"model"`
-		}{
-			Model: DefaultClaudeModel,
-		},
-	}
-
 	// Write to file
-	data, err := yaml.Marshal(defaultConfig)
+	data, err := yaml.Marshal(defaultConfig())
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
@@ -190,34 +221,6 @@ func InitializeConfig() error {
 	fmt.Println("You can edit the config.yaml file to customize your settings.")
 
 	return nil
-}
-
-// setDefaults sets default configuration values
-func setDefaults() {
-	viper.SetDefault("default_provider", "claude")
-	viper.SetDefault("providers.claude", "")
-	viper.SetDefault("providers.qwen", "")
-	viper.SetDefault("providers.copilot", "")
-	viper.SetDefault("providers.goose", "")
-	
-	// Use the same key structure as the YAML
-	viper.SetDefault("security_thresholds.block_level", int(types.SecurityCritical))
-	viper.SetDefault("security_thresholds.warn_level", int(types.SecurityMedium))
-	viper.SetDefault("security_thresholds.auto_proceed_safe", false)
-	
-	viper.SetDefault("cache.enabled", true)
-	viper.SetDefault("cache.max_age_days", 90)
-	viper.SetDefault("cache.max_size_mb", 100)
-	viper.SetDefault("cache.compress", false)
-	
-	viper.SetDefault("prompts.security_analysis", GetDefaultSecurityPrompt())
-	
-	viper.SetDefault("ui.show_details", true)
-	viper.SetDefault("ui.use_colors", true)
-	viper.SetDefault("ui.verbose_output", false)
-	
-	viper.SetDefault("yay.path", "yay")
-	viper.SetDefault("yay.default_flags", []string{})
 }
 
 // validateConfig validates the configuration
