@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 
 	"github.com/aaronsb/yay-friend/internal/config"
 )
@@ -48,6 +47,7 @@ func newConfigShowCmd() *cobra.Command {
 
 			fmt.Println("Current Configuration:")
 			fmt.Printf("Default Provider: %s\n", cfg.DefaultProvider)
+			fmt.Printf("Claude Model: %s\n", cfg.Claude.Model)
 			fmt.Printf("Security Thresholds:\n")
 			fmt.Printf("  Block Level: %s\n", cfg.SecurityThresholds.BlockLevel.String())
 			fmt.Printf("  Warn Level: %s\n", cfg.SecurityThresholds.WarnLevel.String())
@@ -69,16 +69,14 @@ func newConfigSetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "set <key> <value>",
 		Short: "Set a configuration value",
-		Long:  "Set a configuration value (e.g., 'yay-friend config set default_provider claude')",
+		Long:  "Set a configuration value using a dotted key path (e.g., 'yay-friend config set claude.model opus')",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			key := args[0]
 			value := args[1]
 
-			viper.Set(key, value)
-			
-			if err := viper.WriteConfig(); err != nil {
-				return fmt.Errorf("failed to write config: %w", err)
+			if err := config.Set(key, value); err != nil {
+				return err
 			}
 
 			fmt.Printf("Set %s = %s\n", key, value)
