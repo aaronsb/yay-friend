@@ -484,8 +484,9 @@ func (c *ClaudeProvider) parseAnalysisResponse(response string, pkgInfo types.Pa
 	
 	// Convert to our types
 	overallEntropy := parseSecurityEntropy(analysisData.OverallEntropy)
-	if overallEntropy == types.EntropyMinimal && analysisData.OverallLevel != "" {
-		// Fallback to overall_level if entropy not provided
+	if analysisData.OverallEntropy == "" && analysisData.OverallLevel != "" {
+		// Only fall back to the legacy overall_level when overall_entropy is
+		// genuinely absent — a real "MINIMAL" must not trigger the fallback.
 		overallEntropy = parseSecurityEntropy(analysisData.OverallLevel)
 	}
 
@@ -505,8 +506,11 @@ func (c *ClaudeProvider) parseAnalysisResponse(response string, pkgInfo types.Pa
 	
 	for _, finding := range analysisData.Findings {
 		entropy := parseSecurityEntropy(finding.Entropy)
-		if entropy == types.EntropyMinimal {
-			// Fallback to severity if entropy not provided
+		if finding.Entropy == "" && finding.Severity != "" {
+			// Only fall back to the legacy severity field when entropy is
+			// absent. Previously ANY finding parsed to MINIMAL hit this branch
+			// and, with severity empty, defaulted to MODERATE — silently
+			// promoting every benign finding a level or more.
 			entropy = parseSecurityEntropy(finding.Severity)
 		}
 		
@@ -541,11 +545,6 @@ func parseSecurityEntropy(level string) types.SecurityEntropy {
 	default:
 		return types.EntropyModerate
 	}
-}
-
-// parseSecurityLevel converts string to SecurityLevel (legacy compatibility)
-func parseSecurityLevel(level string) types.SecurityLevel {
-	return parseSecurityEntropy(level) // They're the same type now
 }
 
 // buildSimpleSecurityPrompt creates a prompt using the config template
