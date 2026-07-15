@@ -23,7 +23,8 @@ A security-focused wrapper around `yay` that uses AI to analyze PKGBUILD files f
 ## ✨ Features
 
 - 🌪️ **Security Entropy Analysis** - Multi-factor risk assessment using AI
-- 🤖 **Multiple AI Providers** - Claude Code, Qwen, Copilot, Goose support
+- 🤖 **Claude Code Powered** - Runs your local Claude Code headless; no API key required (Qwen/Copilot/Goose providers are stubbed for the future — see [#1](https://github.com/aaronsb/yay-friend/issues/1))
+- 🔒 **Locked-down analysis** - Isolated Claude call with all tools denied, so untrusted PKGBUILDs can't execute anything
 - 📊 **Comprehensive Analysis** - Source compilation, multiple origins, maintainer trust
 - ⚡ **Intelligent Caching** - Commit-hash based analysis caching for performance
 - 📡 **Malicious Package Reporting** - Automated threat intelligence sharing
@@ -49,6 +50,35 @@ cd yay-friend
 go build -o yay-friend ./cmd/yay-friend
 ./install.sh --user --build
 ```
+
+## 🔑 Authentication & Cost
+
+`yay-friend` does **not** talk to any AI API directly. For each package it shells
+out to your **locally installed Claude Code** in headless mode (`claude --print`)
+and reads back the analysis. This has a few important consequences:
+
+- **It uses your own Claude authentication.** Whatever `claude` is already logged
+  into is what gets used — a **Claude Pro/Max subscription** *or* an
+  **`ANTHROPIC_API_KEY`**. No API key is required if you're signed in with a
+  subscription.
+- **It spends your own Claude usage.** Each fresh analysis is one Claude request
+  billed to *your* account (results are cached by AUR commit hash, so re-installs
+  and unchanged packages cost nothing). On a subscription, programmatic calls draw
+  from your plan's usage; if you want fully predictable, metered billing, set an
+  `ANTHROPIC_API_KEY` and Claude Code will use that instead.
+- **It never touches your credentials.** `yay-friend` only runs the official
+  `claude` binary and pipes a prompt to it over stdin. It does not read, extract,
+  store, or forward your subscription token or API key — Claude Code manages its
+  own auth internally. This is the officially supported
+  [headless/programmatic mode](https://code.claude.com/docs/en/headless), the same
+  mechanism the Claude Agent SDK is built on.
+- **Analysis runs locked down.** The Claude call is isolated: your MCP servers are
+  disabled and *all* built-in tools (Bash, file access, web) are denied, so an
+  untrusted PKGBUILD can be read and classified but can never cause Claude to
+  execute anything on your machine.
+
+> **Prerequisite:** Install and sign in to [Claude Code](https://claude.com/claude-code)
+> first (`claude` must be on your `PATH`). Verify with `yay-friend provider test claude`.
 
 ## 📋 Usage
 
@@ -105,7 +135,7 @@ yay-friend cache clear -y
 
 #### Cache Benefits
 - **⚡ 95%+ faster** for previously analyzed packages (no AI call needed)
-- **💰 Cost reduction** - Dramatically reduces AI provider API costs
+- **💰 Cost reduction** - Unchanged packages cost nothing; no repeat Claude usage
 - **🔄 Consistency** - Identical analysis results for same package version
 - **📱 Offline capability** - Re-analyze previously seen packages offline
 
@@ -269,10 +299,14 @@ security_thresholds:
 ```yaml
 default_provider: claude
 providers:
-  claude: ""     # Uses system claude command
-  qwen: ""       # Configuration path
-  copilot: ""    # Configuration path  
-  goose: ""      # Configuration path
+  claude: ""     # Uses your local `claude` command (the only working provider today)
+  qwen: ""       # Stub — not yet implemented (see issue #1)
+  copilot: ""    # Stub — not yet implemented
+  goose: ""      # Stub — not yet implemented
+claude:
+  model: sonnet  # Model alias passed to `claude --model` (e.g. sonnet, opus).
+                 # Pinned so analysis is reproducible instead of drifting with
+                 # your interactive default. Defaults to "sonnet" if unset.
 ```
 
 ## 🧪 Development & Testing

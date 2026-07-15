@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,15 @@ import (
 	"github.com/aaronsb/yay-friend/internal/config"
 	"github.com/aaronsb/yay-friend/internal/types"
 )
+
+// deniedTools lists every built-in Claude Code tool yay-friend forbids during
+// analysis. A PKGBUILD is untrusted input that may attempt prompt injection, so
+// the model must only read and classify the text we hand it — never execute,
+// write, or fetch anything.
+var deniedTools = []string{
+	"Bash", "Edit", "Write", "NotebookEdit", "Read", "Glob", "Grep",
+	"WebFetch", "WebSearch", "Task", "TodoWrite",
+}
 
 // ClaudeProvider implements the AIProvider interface for Claude Code
 type ClaudeProvider struct {
@@ -115,25 +125,38 @@ func (c *ClaudeProvider) AnalyzePKGBUILDWithOptions(ctx context.Context, pkgInfo
 
 	prompt := c.buildSimpleSecurityPrompt(pkgInfo)
 
-	// Debug: Write the full prompt to see what's being sent
-	os.WriteFile("/tmp/claude-final-prompt.txt", []byte(prompt), 0644)
-
-	// Get or create a dedicated directory for claude executions
+	// Get or create a dedicated directory for claude executions. Running from a
+	// neutral directory keeps claude from auto-discovering a project CLAUDE.md or
+	// polluting other conversation histories.
 	claudeWorkDir := c.getClaudeWorkDir()
 	if err := os.MkdirAll(claudeWorkDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create claude work directory: %w", err)
 	}
-	
+
+	// Opt-in prompt dump for debugging, kept out of world-readable /tmp.
+	if os.Getenv("YAYFRIEND_DEBUG") != "" {
+		_ = os.WriteFile(filepath.Join(claudeWorkDir, "last-prompt.txt"), []byte(prompt), 0600)
+	}
+
+	args := c.buildClaudeArgs()
+
 	var output []byte
+	var stderr bytes.Buffer
 	var err error
-	
-	if noSpinner {
-		fmt.Printf("Analyzing with Claude...\n")
-		// No spinner - just run claude directly with --print flag
-		cmd := exec.CommandContext(ctx, c.claudePath, "--print")
-		cmd.Dir = claudeWorkDir // Set working directory to avoid polluting other histories
+
+	runClaude := func() {
+		cmd := exec.CommandContext(ctx, c.claudePath, args...)
+		cmd.Dir = claudeWorkDir // neutral working directory; see above
 		cmd.Stdin = strings.NewReader(prompt)
+		cmd.Stderr = &stderr
 		output, err = cmd.Output()
+	}
+
+	// Only animate the spinner on an interactive terminal; when output is piped
+	// or redirected (automation, CI), the \r-based spinner just spams lines.
+	if noSpinner || !isTerminal(os.Stdout) {
+		fmt.Printf("Analyzing with Claude...\n")
+		runClaude()
 		fmt.Printf("Analysis complete.\n")
 	} else {
 		fmt.Printf("Analyzing with Claude... ")
@@ -156,29 +179,133 @@ func (c *ClaudeProvider) AnalyzePKGBUILDWithOptions(ctx context.Context, pkgInfo
 			}
 		}()
 
-		// Run claude with the prompt via stdin using --print flag for non-interactive mode
-		cmd := exec.CommandContext(ctx, c.claudePath, "--print")
-		cmd.Dir = claudeWorkDir // Set working directory to avoid polluting other histories
-		cmd.Stdin = strings.NewReader(prompt)
-		output, err = cmd.Output()
+		runClaude()
 
 		// Stop spinner and clear line
 		done <- true
 		time.Sleep(10 * time.Millisecond) // Give spinner time to clear
 		fmt.Printf("\rAnalyzing with Claude... Complete!\n")
 	}
-	
+
 	if err != nil {
+		if stderr.Len() > 0 {
+			return nil, fmt.Errorf("claude analysis failed: %w: %s", err, strings.TrimSpace(stderr.String()))
+		}
 		return nil, fmt.Errorf("claude analysis failed: %w", err)
 	}
 
+	// Unwrap the structured JSON envelope to the model's text result.
+	resultText, err := extractClaudeResult(output)
+	if err != nil {
+		return nil, err
+	}
+
 	// Parse the response
-	analysis, err := c.parseAnalysisResponse(string(output), pkgInfo)
+	analysis, err := c.parseAnalysisResponse(resultText, pkgInfo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse analysis: %w", err)
 	}
 
 	return analysis, nil
+}
+
+// buildClaudeArgs assembles the flags for a hardened, isolated headless call.
+// The invocation is deliberately minimal and locked down:
+//   - --print / --output-format json: non-interactive, structured envelope
+//   - --model: pinned so analysis is reproducible rather than drifting with the
+//     user's interactive default
+//   - --strict-mcp-config + empty --mcp-config: ignore the user's MCP servers so
+//     analysis can't reach Slack, Google, etc.
+//   - --disallowedTools: deny every built-in tool (see deniedTools)
+//
+// Authentication is intentionally left untouched: this inherits whatever the
+// local `claude` is logged into (subscription OAuth or ANTHROPIC_API_KEY).
+// yay-friend never reads, extracts, or forwards credentials.
+func (c *ClaudeProvider) buildClaudeArgs() []string {
+	return []string{
+		"--print",
+		"--output-format", "json",
+		"--model", c.getModel(),
+		"--strict-mcp-config",
+		"--mcp-config", `{"mcpServers":{}}`,
+		"--disallowedTools", strings.Join(deniedTools, ","),
+	}
+}
+
+// isTerminal reports whether f is an interactive character device (a TTY),
+// as opposed to a pipe or regular file.
+func isTerminal(f *os.File) bool {
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
+}
+
+// getModel returns the configured model alias, or the default.
+func (c *ClaudeProvider) getModel() string {
+	if c.config != nil && c.config.Claude.Model != "" {
+		return c.config.Claude.Model
+	}
+	return config.DefaultClaudeModel
+}
+
+// claudeEvent captures the fields we need from `claude --output-format json`.
+// That format emits either a single result object or (in richer environments) a
+// JSON array of events ending in a result event; extractClaudeResult handles both.
+type claudeEvent struct {
+	Type    string `json:"type"`
+	Subtype string `json:"subtype"`
+	IsError bool   `json:"is_error"`
+	Result  string `json:"result"`
+}
+
+// extractClaudeResult unwraps the JSON envelope from `claude --output-format json`
+// and returns the model's text result. It tolerates three shapes: a JSON array of
+// events, a single result object, or (defensively) raw non-JSON text.
+func extractClaudeResult(output []byte) (string, error) {
+	trimmed := bytes.TrimSpace(output)
+	if len(trimmed) == 0 {
+		return "", fmt.Errorf("claude returned empty output")
+	}
+
+	var result *claudeEvent
+	switch trimmed[0] {
+	case '[':
+		var events []claudeEvent
+		if err := json.Unmarshal(trimmed, &events); err != nil {
+			return "", fmt.Errorf("failed to parse claude event stream: %w", err)
+		}
+		for i := range events {
+			if events[i].Type == "result" {
+				result = &events[i]
+			}
+		}
+	case '{':
+		var ev claudeEvent
+		if err := json.Unmarshal(trimmed, &ev); err != nil {
+			return "", fmt.Errorf("failed to parse claude result: %w", err)
+		}
+		if ev.Type == "result" || ev.Result != "" {
+			result = &ev
+		}
+	default:
+		// Not a JSON envelope (e.g. plain --print text); use as-is.
+		return string(trimmed), nil
+	}
+
+	if result == nil {
+		// No result event found; fall back to raw output so parsing can still try.
+		return string(trimmed), nil
+	}
+	if result.IsError {
+		msg := result.Result
+		if msg == "" {
+			msg = result.Subtype
+		}
+		return "", fmt.Errorf("claude reported an error: %s", msg)
+	}
+	return result.Result, nil
 }
 
 // GetCapabilities returns the provider capabilities
