@@ -27,9 +27,7 @@ A security-focused wrapper around `yay` that uses AI to analyze PKGBUILD files f
 - 🔒 **Locked-down analysis** - Isolated Claude call with built-in tools denied (defense-in-depth), so untrusted PKGBUILDs are read, not executed
 - 📊 **Comprehensive Analysis** - Source compilation, multiple origins, maintainer trust
 - ⚡ **Intelligent Caching** - Commit-hash based analysis caching for performance
-- 📡 **Malicious Package Reporting** - Automated threat intelligence sharing
 - 🔧 **Developer Tools** - Test commands, configuration management
-- 🏗️ **Trust Scoring** - Repository age, maintainer reputation analysis
 
 ## 🚀 Installation
 
@@ -261,23 +259,20 @@ make
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   yay-friend    │    │   AI Providers   │    │   Trust Engine  │
-│     CLI         │◄───┤  Claude/Qwen/etc │    │  Repo Analysis  │
+│   yay-friend    │    │   AI Providers   │    │   AUR Fetcher   │
+│      CLI        │◄───┤  Claude/Qwen/etc │    │  Metadata/git   │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
          │                       │                       │
          ▼                       ▼                       ▼
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Config Mgmt   │    │   Entropy Engine │    │   Evaluation    │
-│  ~/.yay-friend  │    │  Security Analysis│    │    Logging     │
+│   Config Mgmt   │    │  Entropy Engine  │    │  Analysis Cache │
+│   config.yaml   │    │ Pre-scan + AI    │    │  by commit hash │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
 ```
 
 ### Core Components
 - **🧠 Entropy Analysis Engine**: Multi-factor security assessment
 - **🔌 Provider Interface**: Modular AI backend system
-- **📊 Trust Scoring**: Repository and maintainer reputation
-- **📝 Evaluation Logging**: Audit trail with individual JSON files
-- **📡 Threat Reporting**: Community threat intelligence sharing
 - **⚙️ Configuration Management**: User preferences and thresholds
 
 ## 📁 Directory Structure
@@ -286,13 +281,10 @@ XDG Base Directory compliant:
 
 ```
 ${XDG_CONFIG_HOME:-$HOME/.config}/yay-friend/
-├── config.yaml          # Main configuration
-├── providers/           # AI provider configurations
-└── cache/              # Temporary analysis data
+└── config.yaml          # Main configuration
 
 ${XDG_DATA_HOME:-$HOME/.local/share}/yay-friend/
-├── evaluations/          # Individual analysis JSON files
-└── reports/             # Malicious package reports
+└── cache/               # Analysis results, keyed by AUR commit hash
 ```
 
 ## 🔧 Configuration
@@ -340,8 +332,9 @@ yay-friend analyze some-git-package
 # Check provider authentication
 yay-friend provider test
 
-# View recent evaluations
-ls -la "${XDG_DATA_HOME:-$HOME/.local/share}/yay-friend/evaluations/"
+# Inspect the analysis cache
+yay-friend cache status
+yay-friend cache show hello
 ```
 
 ## 🤝 Contributing
