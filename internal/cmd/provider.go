@@ -43,9 +43,9 @@ func newProviderListCmd() *cobra.Command {
 				provider, _ := registry.Get(name)
 				capabilities := provider.GetCapabilities()
 
-				status := "❌ Not authenticated"
+				status := "not authenticated"
 				if provider.IsAuthenticated() {
-					status = "✅ Authenticated"
+					status = "authenticated"
 				}
 
 				ui.Blank()

@@ -53,6 +53,8 @@ func newConfigShowCmd() *cobra.Command {
 
 			ui.Field("block at", ui.Mark(cfg.SecurityThresholds.BlockLevel))
 			ui.Field("warn at", ui.Mark(cfg.SecurityThresholds.WarnLevel))
+			ui.Blank()
+			fmt.Print(ui.Legend())
 			ui.Field("auto proceed", fmt.Sprintf("%v", cfg.SecurityThresholds.AutoProceed))
 
 			ui.Field("show details", fmt.Sprintf("%v", cfg.UI.ShowDetails))

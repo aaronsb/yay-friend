@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -245,17 +244,10 @@ func runAnalyzeLocal(ctx context.Context, path string) error {
 	// Display what we collected for analysis
 	ui.RenderCollected(&pkgInfo)
 
-	// Show if we found additional files
-	if len(pkgInfo.AdditionalFiles) > 0 {
-		fmt.Printf("• Additional files found: ")
-		var fileNames []string
-		for name := range pkgInfo.AdditionalFiles {
-			fileNames = append(fileNames, name)
-		}
-		fmt.Printf("%s\n", strings.Join(fileNames, ", "))
-	}
+	// RenderCollected already lists AdditionalFiles; only the install script
+	// needs calling out, because it is the part that runs as root.
 	if pkgInfo.InstallScript != "" {
-		fmt.Printf("• Install script: %s\n", filepath.Base(installScriptPath))
+		ui.Field("install script", filepath.Base(installScriptPath))
 	}
 
 	// Analyze security

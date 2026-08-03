@@ -48,9 +48,9 @@ func presentPackageSelection(results []yay.PackageSearchResult) ([]string, error
 		}
 	}
 
-	// The prompt keeps yay's `==>` and its selection grammar, because the muscle
-	// memory is the point. yay-friend's own narration uses `::` instead, so the
-	// two voices stay distinguishable even here.
+	// The selection grammar (1 2 3, 1-3, ^4) is yay's, because the muscle memory
+	// is the point. The prompt marker is not: this selector is yay-friend's own
+	// UI, so it speaks in yay-friend's voice.
 	ui.Say("packages to install (eg: 1 2 3, 1-3 or ^4)")
 	fmt.Print(ui.Voice() + " ")
 

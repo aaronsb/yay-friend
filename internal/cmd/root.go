@@ -218,7 +218,7 @@ func runInstall(ctx context.Context, args []string) error {
 		if allSafe {
 			ui.Blank()
 			ui.Say("all packages passed security analysis")
-			ui.Say("proceed with installation? [y/N]: ")
+			ui.Ask("proceed with installation? [y/N]: ")
 
 			var response string
 			fmt.Scanln(&response)
@@ -338,7 +338,7 @@ func handleAnalysisResult(analysis *types.SecurityAnalysis, cfg *types.Config) e
 
 		// Ask user for confirmation unless auto-proceed is enabled
 		if !cfg.SecurityThresholds.AutoProceed {
-			ui.Say("continue with installation? [y/N]: ")
+			ui.Ask("continue with installation? [y/N]: ")
 			var response string
 			fmt.Scanln(&response)
 			if response != "y" && response != "Y" {

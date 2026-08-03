@@ -148,7 +148,7 @@ func runCacheClean(ctx context.Context, days int) error {
 
 func runCacheClear(ctx context.Context, confirm bool) error {
 	if !confirm {
-		ui.Say("this will remove ALL cached analysis results. continue? [y/N]: ")
+		ui.Ask("this will remove ALL cached analysis results. continue? [y/N]: ")
 		var response string
 		fmt.Scanln(&response)
 		if response != "y" && response != "Y" {

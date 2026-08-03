@@ -8,8 +8,8 @@ import (
 	"golang.org/x/term"
 )
 
-// colorEnabled is consulted by nothing directly; it exists so Configure can
-// report what it decided. lipgloss holds the actual switch.
+// colorEnabled records what Configure decided. lipgloss holds the actual switch;
+// this exists so the decision is inspectable in a debugger and in tests.
 var colorEnabled = true
 
 // Configure sets colour output once, at startup.
@@ -24,10 +24,10 @@ var colorEnabled = true
 // The config key existed and was read by nothing before this: it was written to
 // every user's config.yaml, printed by `config show`, and had no effect.
 //
-// This gates emoji too, via Enabled. Terminals that cannot render colour are
-// frequently the same ones that render emoji as replacement boxes, and gookit's
-// NO_COLOR handling -- which this replaces -- never covered the emoji sprinkled
-// through the output.
+// gookit's NO_COLOR handling, which this replaces, covered escape sequences but
+// not the emoji that were scattered through the output. Those are gone rather
+// than gated: the entropy ramp and the :: marker carry the status they used to,
+// and a switch guarding glyphs nobody wants is a switch with nothing behind it.
 func Configure(noColorFlag bool, cfgUseColors bool) {
 	switch {
 	case noColorFlag:
@@ -44,10 +44,6 @@ func Configure(noColorFlag bool, cfgUseColors bool) {
 		lipgloss.SetColorProfile(termenv.Ascii)
 	}
 }
-
-// Enabled reports whether decorated output is on. Callers use it to drop emoji
-// and other glyphs a plain terminal would mangle.
-func Enabled() bool { return colorEnabled }
 
 // isTTY reports whether stdout is an interactive terminal.
 //

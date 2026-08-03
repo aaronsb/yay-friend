@@ -2,8 +2,10 @@ package ui
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
@@ -74,15 +76,125 @@ func TestMarkOutOfRange(t *testing.T) {
 	}
 }
 
+// TestRuleFitsWidth asserts against the width actually in use, and includes
+// titles longer than the line. An earlier version clamped only the tail, so a
+// 66-cell title at width 72 produced a 73-cell rule; asserting against the
+// maxWidth constant with a short title could not see it.
 func TestRuleFitsWidth(t *testing.T) {
 	plain(t)
-	for _, title := range []string{"", "pkg", "a-very-long-package-name-that-runs-on-and-on-and-on"} {
+	w := width()
+	for _, title := range []string{
+		"",
+		"pkg",
+		"a-very-long-package-name-that-runs-on-and-on-and-on",
+		strings.Repeat("x", w-6),
+		strings.Repeat("x", w),
+		strings.Repeat("x", w*2),
+		strings.Repeat("🌪", w), // wide runes: cell count != rune count
+	} {
 		got := Rule(title)
-		if w := lipgloss.Width(got); w > maxWidth {
-			t.Errorf("Rule(%q) is %d cells, exceeds maxWidth %d", title, w, maxWidth)
+		if gw := lipgloss.Width(got); gw != w {
+			t.Errorf("Rule(len %d title) is %d cells, want exactly %d", lipgloss.Width(title), gw, w)
 		}
-		if title != "" && !strings.Contains(got, title) {
-			t.Errorf("Rule(%q) lost its title: %q", title, got)
+	}
+	if got := Rule("pkg"); !strings.Contains(got, "pkg") {
+		t.Errorf("Rule lost a title that fits: %q", got)
+	}
+}
+
+// TestAskLeavesCursorInline: Say ends the line, Ask must not. The install
+// confirmation is the gate that asks whether to proceed despite security
+// concerns, and it reads wrong with the cursor on the next line.
+func TestAskLeavesCursorInline(t *testing.T) {
+	buf := plain(t)
+	Ask("continue? [y/N]: ")
+	if got := buf.String(); strings.HasSuffix(got, "\n") {
+		t.Errorf("Ask output ends with a newline: %q", got)
+	}
+	buf.Reset()
+	Say("done")
+	if got := buf.String(); !strings.HasSuffix(got, "\n") {
+		t.Errorf("Say output should end with a newline: %q", got)
+	}
+}
+
+// TestNoFieldSilentlyDropped fills every displayed field with a unique sentinel
+// and asserts each one reaches the output, at both detail levels.
+//
+// This exists because the change that introduced this package collapsed two
+// renderers into one. For a security tool, a field that quietly stops being
+// displayed is a defect with no symptom: the user simply never sees a finding
+// that might have changed their decision.
+func TestNoFieldSilentlyDropped(t *testing.T) {
+	analysis := &types.SecurityAnalysis{
+		PackageName:         "SENTINEL_PKGNAME",
+		OverallLevel:        types.EntropyHigh,
+		PredictabilityScore: 0.77,
+		EntropyFactors:      []string{"SENTINEL_FACTOR"},
+		Summary:             "SENTINEL_SUMMARY",
+		Recommendation:      "SENTINEL_RECOMMENDATION",
+		Provider:            "SENTINEL_PROVIDER",
+		EducationalSummary:  "SENTINEL_EDUCATION",
+		SecurityLessons:     []string{"SENTINEL_LESSON"},
+		AnalyzedAt:          time.Date(2026, 8, 3, 14, 27, 2, 0, time.UTC),
+		Findings: []types.SecurityFinding{{
+			Type:         "SENTINEL_TYPE",
+			Entropy:      types.EntropyCritical,
+			Description:  "SENTINEL_DESCRIPTION",
+			Context:      "SENTINEL_CONTEXT",
+			Suggestion:   "SENTINEL_SUGGESTION",
+			EntropyNotes: "SENTINEL_NOTES",
+			LineNumber:   4242,
+		}},
+	}
+
+	always := []string{
+		"SENTINEL_PKGNAME", "SENTINEL_FACTOR", "SENTINEL_SUMMARY",
+		"SENTINEL_RECOMMENDATION", "SENTINEL_EDUCATION", "SENTINEL_LESSON",
+		"SENTINEL_TYPE", "SENTINEL_DESCRIPTION", "SENTINEL_CONTEXT",
+		"SENTINEL_SUGGESTION", "SENTINEL_NOTES", "4242", "0.77",
+		"HIGH", "CRITICAL",
+	}
+
+	for _, detailed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("detailed=%v", detailed), func(t *testing.T) {
+			buf := plain(t)
+			RenderAnalysis(analysis, detailed)
+			out := buf.String()
+			want := always
+			if detailed {
+				want = append(append([]string{}, always...), "SENTINEL_PROVIDER", "2026-08-03")
+			}
+			for _, w := range want {
+				if !strings.Contains(out, w) {
+					t.Errorf("field %q never reached the output\n---\n%s", w, out)
+				}
+			}
+		})
+	}
+}
+
+// TestCollectedFieldsRendered is the same invariant for the pre-analysis view.
+func TestCollectedFieldsRendered(t *testing.T) {
+	buf := plain(t)
+	RenderCollected(&types.PackageInfo{
+		Name: "SENTINEL_NAME", Version: "SENTINEL_VERSION",
+		Maintainer:   "SENTINEL_MAINTAINER",
+		PKGBUILD:     "a\nb\nc",
+		Dependencies: []string{"SENTINEL_DEP"},
+		MakeDepends:  []string{"SENTINEL_MAKEDEP"},
+		OptDepends:   []string{"SENTINEL_OPTDEP"},
+		Votes:        412, Popularity: 8.213,
+		FirstSubmitted: "SENTINEL_SUBMITTED", LastUpdated: "SENTINEL_UPDATED",
+		AdditionalFiles: map[string]string{"SENTINEL_FILE": ""},
+	})
+	for _, w := range []string{
+		"SENTINEL_NAME", "SENTINEL_VERSION", "SENTINEL_MAINTAINER",
+		"SENTINEL_DEP", "SENTINEL_MAKEDEP", "SENTINEL_SUBMITTED",
+		"SENTINEL_UPDATED", "SENTINEL_FILE", "412", "8.213",
+	} {
+		if !strings.Contains(buf.String(), w) {
+			t.Errorf("collected field %q missing\n---\n%s", w, buf.String())
 		}
 	}
 }

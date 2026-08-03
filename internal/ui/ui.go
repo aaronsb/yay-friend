@@ -110,9 +110,9 @@ func Legend() string {
 	return b.String()
 }
 
-// Width returns the usable render width, clamped so long lines stay readable on
+// width returns the usable render width, clamped so long lines stay readable on
 // a maximised terminal and do not wrap on a narrow one.
-func Width() int {
+func width() int {
 	w, _, err := term.GetSize(int(os.Stdout.Fd()))
 	if err != nil || w <= 0 {
 		return maxWidth
@@ -130,18 +130,50 @@ func Width() int {
 // An empty title gives a plain rule. This is the only divider in the program;
 // it replaces five hand-rolled variants of strings.Repeat.
 func Rule(title string) string {
-	w := Width()
+	w := width()
 	if title == "" {
 		return dimStyle.Render(strings.Repeat("─", w))
 	}
-	lead := dimStyle.Render("── ")
-	name := boldStyle.Render(title)
-	used := 3 + lipgloss.Width(title) + 1
-	tail := w - used
-	if tail < 3 {
-		tail = 3
+
+	// Reserve "── " on the left, a space and at least three dashes on the right,
+	// then truncate the title to whatever remains. Clamping only the tail would
+	// let a long title push the line past w -- a 66-char title at width 72 gave
+	// a 73-cell rule.
+	const leadWidth, minTail = 3, 3
+	budget := w - leadWidth - 1 - minTail
+	if budget < 1 {
+		budget = 1
 	}
-	return lead + name + " " + dimStyle.Render(strings.Repeat("─", tail))
+	if lipgloss.Width(title) > budget {
+		title = truncate(title, budget)
+	}
+
+	tail := w - leadWidth - lipgloss.Width(title) - 1
+	if tail < minTail {
+		tail = minTail
+	}
+	return dimStyle.Render("── ") + boldStyle.Render(title) + " " +
+		dimStyle.Render(strings.Repeat("─", tail))
+}
+
+// truncate cuts s to at most n cells, marking the cut with an ellipsis when
+// there is room for one.
+func truncate(s string, n int) string {
+	if lipgloss.Width(s) <= n {
+		return s
+	}
+	if n <= 1 {
+		return string([]rune(s)[:n])
+	}
+	runes := []rune(s)
+	out := make([]rune, 0, n)
+	for _, r := range runes {
+		if lipgloss.Width(string(append(out, r)))+1 > n {
+			break
+		}
+		out = append(out, r)
+	}
+	return string(out) + "…"
 }
 
 // Say prints a line in yay-friend's own voice. See rule 2 in the package
@@ -149,6 +181,16 @@ func Rule(title string) string {
 // the thing being analysed.
 func Say(format string, a ...any) {
 	fmt.Fprintln(Out, voiceStyle.Render("::")+" "+fmt.Sprintf(format, a...))
+}
+
+// Ask prints a prompt in yay-friend's voice and leaves the cursor on the same
+// line, so the user types their answer next to the question.
+//
+// This is separate from Say because Say ends the line. Routing the install
+// confirmation through Say put the cursor underneath the question -- on the
+// gate that asks whether to install a package with security concerns.
+func Ask(format string, a ...any) {
+	fmt.Fprint(Out, voiceStyle.Render("::")+" "+fmt.Sprintf(format, a...))
 }
 
 // Warn is Say for things that went wrong but are not fatal. It keeps the same
