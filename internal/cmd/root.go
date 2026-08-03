@@ -304,10 +304,10 @@ func analyzeAndDecide(ctx context.Context, yayClient *yay.YayClient, provider ty
 // handleAnalysisResult processes the analysis result and makes a decision
 func handleAnalysisResult(analysis *types.SecurityAnalysis, cfg *types.Config) error {
 	// Display analysis summary with better formatting
-	fmt.Printf("\n" + strings.Repeat("=", 60) + "\n")
+	fmt.Print("\n" + strings.Repeat("=", 60) + "\n")
 	color.Bold.Print("Security Analysis Results: ")
 	color.Magenta.Printf("%s\n", analysis.PackageName)
-	fmt.Printf(strings.Repeat("=", 60) + "\n")
+	fmt.Print(strings.Repeat("=", 60) + "\n")
 
 	// Display entropy level with color coding
 	entropyIcon := getEntropyIcon(analysis.OverallLevel)
@@ -327,7 +327,7 @@ func handleAnalysisResult(analysis *types.SecurityAnalysis, cfg *types.Config) e
 	if analysis.EducationalSummary != "" {
 		fmt.Printf("\n")
 		color.Bold.Printf("Security Education:\n")
-		fmt.Printf(strings.Repeat("-", 60) + "\n")
+		fmt.Print(strings.Repeat("-", 60) + "\n")
 		fmt.Printf("%s\n", analysis.EducationalSummary)
 	}
 
@@ -358,7 +358,7 @@ func handleAnalysisResult(analysis *types.SecurityAnalysis, cfg *types.Config) e
 	if len(analysis.Findings) > 0 {
 		fmt.Printf("\n")
 		color.Bold.Printf("Detailed Security Analysis:\n")
-		fmt.Printf(strings.Repeat("-", 60) + "\n")
+		fmt.Print(strings.Repeat("-", 60) + "\n")
 		for i, finding := range analysis.Findings {
 			icon := getEntropyIcon(finding.Entropy)
 			entropyColor := getEntropyColor(finding.Entropy)

@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/aaronsb/yay-friend/internal/pkgbuild"
 	"github.com/aaronsb/yay-friend/internal/types"
 )
 
@@ -17,7 +18,7 @@ type PackageSearchResult struct {
 	Repository  string `json:"repository"`
 	Name        string `json:"name"`
 	Version     string `json:"version"`
-	Info        string `json:"info"`        // Vote count, popularity, etc
+	Info        string `json:"info"` // Vote count, popularity, etc
 	Description string `json:"description"`
 }
 
@@ -52,19 +53,25 @@ func (y *YayClient) GetPackageInfo(ctx context.Context, packageName string) (*ty
 		return nil, fmt.Errorf("failed to get PKGBUILD for %s: %w", packageName, err)
 	}
 
-	pkgbuild := string(output)
-	
-	// Parse PKGBUILD for metadata
+	src := string(output)
+
+	// Parse PKGBUILD for metadata. Name stays as the caller requested it: for a
+	// split package the requested name is the authoritative one, and it need not
+	// be the first entry of the pkgname array.
 	info := &types.PackageInfo{
-		Name:     packageName,
-		PKGBUILD: pkgbuild,
+		Name:       packageName,
+		PKGBUILD:   src,
+		Maintainer: "Unknown",
 	}
 
-	// Extract metadata from PKGBUILD
-	info.Version = extractPKGBUILDField(pkgbuild, "pkgver")
-	info.Description = extractPKGBUILDField(pkgbuild, "pkgdesc")
-	info.URL = extractPKGBUILDField(pkgbuild, "url")
-	info.Maintainer = extractMaintainer(pkgbuild)
+	// A PKGBUILD that will not parse is not fatal here -- the raw source still
+	// reaches the analyzer, which is the part that matters for a security review.
+	if vars, perr := pkgbuild.Parse(src); perr == nil {
+		info.Version = vars.Str("pkgver")
+		info.Description = vars.Str("pkgdesc")
+		info.URL = vars.Str("url")
+		info.Maintainer = vars.Maintainer()
+	}
 
 	return info, nil
 }
@@ -97,26 +104,26 @@ func (y *YayClient) SearchPackages(ctx context.Context, query string) ([]Package
 	// Parse search results
 	var results []PackageSearchResult
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
-	
+
 	// Regex patterns for parsing yay output
 	packageRe := regexp.MustCompile(`^([a-zA-Z0-9][a-zA-Z0-9._+-]*)/([a-zA-Z0-9][a-zA-Z0-9._+-]*)\s+([^\s]+)\s+(.*)`)
-	
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		if matches := packageRe.FindStringSubmatch(line); len(matches) >= 5 {
 			// Parse the repo/package version info line
 			repo := matches[1]
-			name := matches[2] 
+			name := matches[2]
 			version := matches[3]
 			info := matches[4]
-			
+
 			// Get description from next line if available
 			var description string
 			if scanner.Scan() {
 				descLine := scanner.Text()
 				description = strings.TrimSpace(descLine)
 			}
-			
+
 			results = append(results, PackageSearchResult{
 				Repository:  repo,
 				Name:        name,
@@ -143,8 +150,8 @@ func ParseYayCommand(args []string) (*types.YayOperation, error) {
 	if strings.HasPrefix(args[0], "-") {
 		// First arg is a flag, standard yay command
 		operation := &types.YayOperation{
-			Command: args[0],
-			Flags:   []string{},
+			Command:  args[0],
+			Flags:    []string{},
 			Packages: []string{},
 		}
 
@@ -179,24 +186,4 @@ func ParseYayCommand(args []string) (*types.YayOperation, error) {
 			Packages:  args, // All args are packages
 		}, nil
 	}
-}
-
-// extractPKGBUILDField extracts a field value from PKGBUILD content
-func extractPKGBUILDField(pkgbuild, field string) string {
-	re := regexp.MustCompile(fmt.Sprintf(`%s\s*=\s*['"]?([^'"'\n\r]*)['"]?`, field))
-	matches := re.FindStringSubmatch(pkgbuild)
-	if len(matches) >= 2 {
-		return strings.Trim(matches[1], "\"'")
-	}
-	return ""
-}
-
-// extractMaintainer extracts maintainer info from PKGBUILD comments
-func extractMaintainer(pkgbuild string) string {
-	re := regexp.MustCompile(`#\s*[Mm]aintainer:\s*(.+)`)
-	matches := re.FindStringSubmatch(pkgbuild)
-	if len(matches) >= 2 {
-		return strings.TrimSpace(matches[1])
-	}
-	return "Unknown"
 }

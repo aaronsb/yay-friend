@@ -107,7 +107,7 @@ func runCacheStatus(ctx context.Context) error {
 
 	fmt.Printf("\n")
 	color.Bold.Printf("Cache Statistics\n")
-	fmt.Printf(strings.Repeat("=", 40) + "\n")
+	fmt.Print(strings.Repeat("=", 40) + "\n")
 	
 	fmt.Printf("Total Packages: %d\n", stats.TotalPackages)
 	fmt.Printf("Total Analyses: %d\n", stats.TotalAnalyses)
@@ -194,7 +194,7 @@ func runCacheShow(ctx context.Context, packageName string) error {
 
 	fmt.Printf("\n")
 	color.Bold.Printf("Cached Analyses for %s\n", packageName)
-	fmt.Printf(strings.Repeat("=", 40) + "\n")
+	fmt.Print(strings.Repeat("=", 40) + "\n")
 
 	for i, commitHash := range versions {
 		analysis, err := cacheManager.GetCachedAnalysis(packageName, commitHash)
