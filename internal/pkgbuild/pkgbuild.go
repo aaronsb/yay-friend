@@ -15,12 +15,26 @@
 package pkgbuild
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
 	"mvdan.cc/sh/v3/syntax"
 )
+
+// Limits on untrusted input. Expansion is the reason these exist: because a
+// variable can reference earlier ones, `a1=$a0$a0$a0$a0` repeated grows
+// geometrically, and 158 bytes of PKGBUILD reaches 2.6 MB by the ninth level.
+// Capping each stored value bounds the whole file to roughly the number of
+// declarations times maxValueLen, which turns the bomb into a truncation.
+const (
+	maxInputSize = 1 << 21 // 2 MiB; the largest PKGBUILD sampled was under 8 KiB
+	maxValueLen  = 1 << 16 // 64 KiB per value
+)
+
+// ErrTooLarge is returned by Parse for input beyond maxInputSize.
+var ErrTooLarge = errors.New("PKGBUILD too large to parse")
 
 // Vars holds the top-level declarations of a single PKGBUILD.
 type Vars struct {
@@ -35,6 +49,10 @@ type Vars struct {
 // variables declared before it, so the near-universal
 // `_pkgname=foo` / `pkgname=${_pkgname}-bin` idiom resolves.
 func Parse(src string) (*Vars, error) {
+	if len(src) > maxInputSize {
+		return nil, fmt.Errorf("%w: %d bytes", ErrTooLarge, len(src))
+	}
+
 	v := &Vars{
 		scalars: map[string]string{},
 		arrays:  map[string][]string{},
@@ -159,16 +177,7 @@ func (v *Vars) LocalSources() []string {
 		}
 		// `local://foo.patch` names a file beside the PKGBUILD (simavr uses it).
 		target = strings.TrimPrefix(target, "local://")
-		if target == "" || isRemote(target) {
-			continue
-		}
-		// An entry still carrying a `$` did not resolve -- a command
-		// substitution, or a reference to something set at build time. It names
-		// no file we can identify, so it is not one.
-		if strings.Contains(target, "$") {
-			continue
-		}
-		if strings.ContainsAny(target, `/\`) || target == "." || target == ".." {
+		if isRemote(target) || !isPlainFilename(target) {
 			continue
 		}
 		if !seen[target] {
@@ -207,11 +216,39 @@ func isRemote(s string) bool {
 	return false
 }
 
-// Install returns the install script filename declared by `install=`, or "".
+// Install returns the install script filename declared by `install=`, or "" if
+// absent or not a plain filename.
+//
+// The filename restriction is load-bearing, not tidiness: the caller reads this
+// file and hands its contents to the analysis provider. `install=../../../.ssh/id_rsa`
+// would otherwise exfiltrate it, and because expansion is resolved, the target
+// need not be written literally.
 //
 // Split packages may instead set install= inside a package_*() function, which
 // is not read here; see the package comment for why function bodies are skipped.
-func (v *Vars) Install() string { return v.scalars["install"] }
+func (v *Vars) Install() string {
+	name := v.scalars["install"]
+	if !isPlainFilename(name) {
+		return ""
+	}
+	return name
+}
+
+// isPlainFilename reports whether s names a file beside the PKGBUILD: no path
+// component, no unresolved expansion, not a directory reference. makepkg
+// requires local files to sit next to the PKGBUILD, so anything else is both
+// malformed and a way out of the package directory.
+func isPlainFilename(s string) bool {
+	if s == "" || s == "." || s == ".." {
+		return false
+	}
+	if strings.ContainsAny(s, `/\`) {
+		return false
+	}
+	// A surviving `$` means the value never resolved; it names nothing we can
+	// identify, so it does not name a file.
+	return !strings.Contains(s, "$")
+}
 
 // Maintainer returns the `# Maintainer:` comment value, or "Unknown".
 // This is a packaging convention expressed in a comment, not shell syntax, so it
@@ -246,10 +283,20 @@ func findMaintainer(src string) string {
 
 // word renders a word to the string a shell would produce, resolving quotes and
 // any parameter expansion naming a variable declared earlier in the file.
+// The result is capped at maxValueLen. Truncating here is what stops a chain of
+// self-referential expansions from growing geometrically; see the note on the
+// limit constants.
 func (v *Vars) word(w *syntax.Word) string {
 	var sb strings.Builder
 	for _, part := range w.Parts {
-		sb.WriteString(v.part(part))
+		if sb.Len() >= maxValueLen {
+			break
+		}
+		s := v.part(part)
+		if remaining := maxValueLen - sb.Len(); len(s) > remaining {
+			s = s[:remaining]
+		}
+		sb.WriteString(s)
 	}
 	return sb.String()
 }
@@ -286,14 +333,17 @@ func (v *Vars) part(part syntax.WordPart) string {
 }
 
 // isSimpleParam reports whether a parameter expansion is a bare $name/${name}
-// with no operator attached. It mirrors the unexported (*syntax.ParamExp).simple
-// in mvdan.cc/sh; every field that type checks must be checked here, so if the
-// library gains an operator field this predicate needs the same addition.
+// with no operator attached.
+//
+// This enumerates every operator field on syntax.ParamExp as of mvdan.cc/sh
+// v3.12.0. The check must stay exhaustive: a field left unchecked means that
+// operator's expansion resolves to the *unmodified* value, which is a wrong
+// answer that looks right -- exactly what this package exists to prevent. On a
+// library upgrade, re-read the ParamExp struct and add any new field here.
 func isSimpleParam(p *syntax.ParamExp) bool {
-	return p.Param != nil && p.Flags == nil &&
-		!p.Excl && !p.Length && !p.Width && !p.IsSet &&
-		p.NestedParam == nil && p.Index == nil &&
-		len(p.Modifiers) == 0 && p.Slice == nil &&
+	return p.Param != nil &&
+		!p.Excl && !p.Length && !p.Width &&
+		p.Index == nil && p.Slice == nil &&
 		p.Repl == nil && p.Names == 0 && p.Exp == nil
 }
 

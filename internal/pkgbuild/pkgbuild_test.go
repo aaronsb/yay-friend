@@ -1,7 +1,10 @@
 package pkgbuild
 
 import (
+	"errors"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -210,6 +213,60 @@ func TestLocalSourcesRejectsPaths(t *testing.T) {
 	want := []string{"good.patch"}
 	if got := v.LocalSources(); !reflect.DeepEqual(got, want) {
 		t.Errorf("LocalSources() = %v, want %v", got, want)
+	}
+}
+
+// TestExpansionBombIsBounded guards a denial of service introduced by adding
+// expansion: because a variable can reference earlier ones, `a1=$a0$a0$a0$a0`
+// repeated grows by 4x per level. Unbounded, 158 bytes of input reached 2.6 MB
+// by the ninth level and a few hundred bytes exhausted memory outright -- a
+// fatal error, not a panic, so no recover() could have caught it.
+func TestExpansionBombIsBounded(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("a0=xxxxxxxxxx\n")
+	for i := 1; i <= 12; i++ {
+		fmt.Fprintf(&b, "a%d=$a%d$a%d$a%d$a%d\n", i, i-1, i-1, i-1, i-1)
+	}
+	v, err := Parse(b.String())
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	for i := range 13 {
+		if got := len(v.Str(fmt.Sprintf("a%d", i))); got > maxValueLen {
+			t.Errorf("a%d expanded to %d bytes, exceeds cap of %d", i, got, maxValueLen)
+		}
+	}
+}
+
+func TestOversizedInputRejected(t *testing.T) {
+	_, err := Parse("pkgname=x\n" + strings.Repeat("# padding\n", maxInputSize/10))
+	if !errors.Is(err, ErrTooLarge) {
+		t.Errorf("Parse(oversized) error = %v, want ErrTooLarge", err)
+	}
+}
+
+// TestInstallRejectsTraversal: the caller reads this file and sends its contents
+// to the analysis provider, so a path escaping the package directory is an
+// exfiltration primitive. The obfuscated form matters because expansion is
+// resolved -- the target need not appear literally in the source.
+func TestInstallRejectsTraversal(t *testing.T) {
+	for _, tc := range []struct{ name, src, want string }{
+		{"literal traversal", "pkgname=x\ninstall=../../../etc/passwd\n", ""},
+		{"expanded traversal", "_p=../../../.ssh\npkgname=x\ninstall=$_p/id_rsa\n", ""},
+		{"absolute path", "pkgname=x\ninstall=/etc/shadow\n", ""},
+		{"subdirectory", "pkgname=x\ninstall=sub/x.install\n", ""},
+		{"unresolved", "pkgname=x\ninstall=$undefined.install\n", ""},
+		{"legitimate", "pkgname=hello\ninstall=$pkgname.install\n", "hello.install"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v, err := Parse(tc.src)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if got := v.Install(); got != tc.want {
+				t.Errorf("Install() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
