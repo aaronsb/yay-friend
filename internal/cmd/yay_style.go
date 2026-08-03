@@ -36,5 +36,11 @@ func RunYayStyleCommand(ctx context.Context, args []string) error {
 		}
 	}
 
+	// cobra.OnInitialize does not fire on this path, so the setup it normally
+	// performs has to happen explicitly. Without this, --no-color and the
+	// ui.use_colors config key are parsed and then ignored on what is the most
+	// common way to invoke yay-friend.
+	initConfig()
+
 	return runInstall(ctx, passthrough)
 }
