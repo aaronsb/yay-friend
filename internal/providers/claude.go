@@ -13,9 +13,12 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/term"
+
 	"github.com/aaronsb/yay-friend/internal/config"
 	"github.com/aaronsb/yay-friend/internal/scanner"
 	"github.com/aaronsb/yay-friend/internal/types"
+	"github.com/aaronsb/yay-friend/internal/ui"
 )
 
 // deniedTools lists the built-in Claude Code tools yay-friend forbids during
@@ -59,24 +62,24 @@ func (c *ClaudeProvider) Name() string {
 func (c *ClaudeProvider) findClaudeCommand() (string, error) {
 	// List of possible locations for the claude command
 	possiblePaths := []string{
-		"claude",                           // In PATH
-		"/usr/local/bin/claude",           // System-wide install
-		"/usr/bin/claude",                 // System package
+		"claude",                // In PATH
+		"/usr/local/bin/claude", // System-wide install
+		"/usr/bin/claude",       // System package
 		"/home/" + os.Getenv("USER") + "/.claude/local/claude", // User-specific install
-		"/opt/claude/claude",              // Optional location
+		"/opt/claude/claude", // Optional location
 	}
-	
+
 	// Also check XDG config directory
 	if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
 		possiblePaths = append(possiblePaths, xdgConfig+"/claude/claude")
 	}
-	
+
 	// Check HOME/.config as fallback
 	if home := os.Getenv("HOME"); home != "" {
 		possiblePaths = append(possiblePaths, home+"/.config/claude/claude")
 		possiblePaths = append(possiblePaths, home+"/.local/bin/claude")
 	}
-	
+
 	for _, path := range possiblePaths {
 		// For relative paths, use exec.LookPath
 		if !strings.Contains(path, "/") {
@@ -85,7 +88,7 @@ func (c *ClaudeProvider) findClaudeCommand() (string, error) {
 			}
 			continue
 		}
-		
+
 		// For absolute paths, check if file exists and is executable
 		if info, err := os.Stat(path); err == nil {
 			if info.Mode()&0111 != 0 { // Check if executable
@@ -93,7 +96,7 @@ func (c *ClaudeProvider) findClaudeCommand() (string, error) {
 			}
 		}
 	}
-	
+
 	return "", fmt.Errorf("claude command not found in any expected location")
 }
 
@@ -195,14 +198,14 @@ func (c *ClaudeProvider) runClaudeOneShot(ctx context.Context, prompt, workDir s
 	args := append([]string{"--print", "--output-format", "json"}, c.baseClaudeArgs()...)
 
 	// Status goes to stderr so stdout stays clean for callers capturing output.
-	fmt.Fprintln(os.Stderr, "Analyzing with Claude...")
+	fmt.Fprintf(os.Stderr, "%s analyzing with Claude…\n", ui.Voice())
 	cmd := exec.CommandContext(ctx, c.claudePath, args...)
 	cmd.Dir = workDir
 	cmd.Stdin = strings.NewReader(prompt)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	output, err := cmd.Output()
-	fmt.Fprintln(os.Stderr, "Analysis complete.")
+	fmt.Fprintf(os.Stderr, "%s analysis complete\n", ui.Voice())
 
 	if err != nil {
 		if stderr.Len() > 0 {
@@ -255,7 +258,7 @@ func (c *ClaudeProvider) runClaudeStreaming(ctx context.Context, prompt, workDir
 				mu.Lock()
 				p := phase
 				mu.Unlock()
-				fmt.Printf("\r\033[KAnalyzing with Claude (%ds, %s)…", int(time.Since(start).Seconds()), p)
+				fmt.Fprintf(os.Stderr, "\r\033[K%s analyzing with Claude (%ds, %s)…", ui.Voice(), int(time.Since(start).Seconds()), p)
 			}
 		}
 	}()
@@ -297,7 +300,7 @@ func (c *ClaudeProvider) runClaudeStreaming(ctx context.Context, prompt, workDir
 	close(doneTick)
 	wg.Wait()
 	waitErr := cmd.Wait()
-	fmt.Printf("\r\033[KAnalyzing with Claude… complete (%ds).\n", int(time.Since(start).Seconds()))
+	fmt.Fprintf(os.Stderr, "\r\033[K%s analysis complete (%ds)\n", ui.Voice(), int(time.Since(start).Seconds()))
 
 	if resultEvent != nil {
 		if resultEvent.IsError {
@@ -322,14 +325,13 @@ func (c *ClaudeProvider) runClaudeStreaming(ctx context.Context, prompt, workDir
 	return "", fmt.Errorf("claude produced no result event")
 }
 
-// isTerminal reports whether f is an interactive character device (a TTY),
-// as opposed to a pipe or regular file.
+// isTerminal reports whether f is an interactive terminal.
+//
+// This must not be an os.ModeCharDevice check: /dev/null is a character device,
+// so that test answered "yes, a terminal" for `yay-friend -S pkg > /dev/null`
+// and the streaming/progress path ran into a redirect.
 func isTerminal(f *os.File) bool {
-	info, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	return info.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(int(f.Fd()))
 }
 
 // getModel returns the configured model alias, or the default.
@@ -416,7 +418,6 @@ func (c *ClaudeProvider) GetCapabilities() types.ProviderCapabilities {
 	}
 }
 
-
 // parseAnalysisResponse parses Claude's JSON response
 func (c *ClaudeProvider) parseAnalysisResponse(response string, pkgInfo types.PackageInfo) (*types.SecurityAnalysis, error) {
 	// Remove markdown code blocks if present
@@ -428,7 +429,7 @@ func (c *ClaudeProvider) parseAnalysisResponse(response string, pkgInfo types.Pa
 			start += 7 // length of "```json"
 			end := strings.Index(response[start:], "```")
 			if end != -1 {
-				response = response[start:start+end]
+				response = response[start : start+end]
 			}
 		}
 	} else if strings.Contains(response, "```") {
@@ -438,15 +439,15 @@ func (c *ClaudeProvider) parseAnalysisResponse(response string, pkgInfo types.Pa
 			start += 3 // length of "```"
 			end := strings.Index(response[start:], "```")
 			if end != -1 {
-				response = response[start:start+end]
+				response = response[start : start+end]
 			}
 		}
 	}
-	
+
 	// Extract JSON from response (Claude might include extra text)
 	jsonStart := strings.Index(response, "{")
 	jsonEnd := strings.LastIndex(response, "}")
-	
+
 	if jsonStart == -1 || jsonEnd == -1 {
 		// Debug: show part of response to understand the issue
 		responsePreview := response
@@ -455,9 +456,9 @@ func (c *ClaudeProvider) parseAnalysisResponse(response string, pkgInfo types.Pa
 		}
 		return nil, fmt.Errorf("no JSON found in response. Preview: %s", responsePreview)
 	}
-	
+
 	jsonStr := response[jsonStart : jsonEnd+1]
-	
+
 	var analysisData struct {
 		OverallEntropy      string   `json:"overall_entropy"`
 		OverallLevel        string   `json:"overall_level"`
@@ -478,11 +479,11 @@ func (c *ClaudeProvider) parseAnalysisResponse(response string, pkgInfo types.Pa
 		Summary        string `json:"summary"`
 		Recommendation string `json:"recommendation"`
 	}
-	
+
 	if err := json.Unmarshal([]byte(jsonStr), &analysisData); err != nil {
 		return nil, fmt.Errorf("failed to parse JSON response: %w", err)
 	}
-	
+
 	// Convert to our types
 	overallEntropy := parseSecurityEntropy(analysisData.OverallEntropy)
 	if analysisData.OverallEntropy == "" && analysisData.OverallLevel != "" {
@@ -504,7 +505,7 @@ func (c *ClaudeProvider) parseAnalysisResponse(response string, pkgInfo types.Pa
 		EducationalSummary:  analysisData.EducationalSummary,
 		SecurityLessons:     analysisData.SecurityLessons,
 	}
-	
+
 	for _, finding := range analysisData.Findings {
 		entropy := parseSecurityEntropy(finding.Entropy)
 		if finding.Entropy == "" && finding.Severity != "" {
@@ -514,7 +515,7 @@ func (c *ClaudeProvider) parseAnalysisResponse(response string, pkgInfo types.Pa
 			// promoting every benign finding a level or more.
 			entropy = parseSecurityEntropy(finding.Severity)
 		}
-		
+
 		analysis.Findings = append(analysis.Findings, types.SecurityFinding{
 			Type:         finding.Type,
 			Entropy:      entropy,
@@ -526,7 +527,7 @@ func (c *ClaudeProvider) parseAnalysisResponse(response string, pkgInfo types.Pa
 			EntropyNotes: finding.EntropyNotes,
 		})
 	}
-	
+
 	return analysis, nil
 }
 
@@ -562,7 +563,7 @@ func (c *ClaudeProvider) buildSimpleSecurityPrompt(pkgInfo types.PackageInfo) st
 
 	// Get the prompt template from config, or use default if not available
 	template := c.getPromptTemplate()
-	
+
 	// Replace template variables
 	prompt := strings.ReplaceAll(template, "{NAME}", pkgInfo.Name)
 	prompt = strings.ReplaceAll(prompt, "{VERSION}", pkgInfo.Version)
@@ -574,14 +575,14 @@ func (c *ClaudeProvider) buildSimpleSecurityPrompt(pkgInfo types.PackageInfo) st
 	prompt = strings.ReplaceAll(prompt, "{DEPENDENCIES}", depends)
 	prompt = strings.ReplaceAll(prompt, "{MAKE_DEPENDS}", makeDepends)
 	prompt = strings.ReplaceAll(prompt, "{PKGBUILD}", pkgInfo.PKGBUILD)
-	
+
 	// Always replace install script placeholder
 	if pkgInfo.InstallScript != "" {
 		prompt = strings.ReplaceAll(prompt, "{INSTALL_SCRIPT}", pkgInfo.InstallScript)
 	} else {
 		prompt = strings.ReplaceAll(prompt, "{INSTALL_SCRIPT}", "[No install script present - this may be due to local PKGBUILD analysis limitations]")
 	}
-	
+
 	// Always replace additional files placeholder
 	if pkgInfo.AdditionalFiles != nil && len(pkgInfo.AdditionalFiles) > 0 {
 		var filesContent []string

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/aaronsb/yay-friend/internal/ui"
 	"github.com/aaronsb/yay-friend/internal/yay"
 )
 
@@ -35,21 +36,23 @@ func presentPackageSelection(results []yay.PackageSearchResult) ([]string, error
 	for i := len(results) - 1; i >= 0; i-- {
 		result := results[i]
 		num := i + 1
-		
+
 		// Format like yay: "20 aur/package-name version (votes popularity)"
 		repoName := fmt.Sprintf("%s/%s", result.Repository, result.Name)
-		
+
 		fmt.Printf("%d %s %s %s\n", num, repoName, result.Version, result.Info)
-		
+
 		// Print description indented
 		if result.Description != "" {
 			fmt.Printf("    %s\n", result.Description)
 		}
 	}
 
-	// Prompt for selection
-	fmt.Printf("==> Packages to install (eg: 1 2 3, 1-3 or ^4)\n")
-	fmt.Printf("==> ")
+	// The selection grammar (1 2 3, 1-3, ^4) is yay's, because the muscle memory
+	// is the point. The prompt marker is not: this selector is yay-friend's own
+	// UI, so it speaks in yay-friend's voice.
+	ui.Say("packages to install (eg: 1 2 3, 1-3 or ^4)")
+	fmt.Print(ui.Voice() + " ")
 
 	// Read user input
 	reader := bufio.NewReader(os.Stdin)
@@ -63,7 +66,7 @@ func presentPackageSelection(results []yay.PackageSearchResult) ([]string, error
 		return nil, fmt.Errorf("no selection made")
 	}
 
-	// Handle Ctrl+C representation (^C) 
+	// Handle Ctrl+C representation (^C)
 	if strings.HasPrefix(inputStr, "^") {
 		return nil, fmt.Errorf("selection cancelled")
 	}
@@ -88,7 +91,7 @@ func presentPackageSelection(results []yay.PackageSearchResult) ([]string, error
 // parseSelection parses user selection string like "1 2 3", "1-3", "^4", etc.
 func parseSelection(input string, maxCount int) ([]int, error) {
 	var indices []int
-	
+
 	// Handle exclusion (^4 means "all except 4")
 	if strings.HasPrefix(input, "^") {
 		excludeStr := strings.TrimPrefix(input, "^")
@@ -96,19 +99,19 @@ func parseSelection(input string, maxCount int) ([]int, error) {
 		if err != nil {
 			return nil, err
 		}
-		
+
 		// Add all indices except excluded ones
 		excludeMap := make(map[int]bool)
 		for _, idx := range excludeIndices {
 			excludeMap[idx] = true
 		}
-		
+
 		for i := 0; i < maxCount; i++ {
 			if !excludeMap[i] {
 				indices = append(indices, i)
 			}
 		}
-		
+
 		return indices, nil
 	}
 
@@ -127,7 +130,7 @@ func parseSelection(input string, maxCount int) ([]int, error) {
 	for _, idx := range indices {
 		indexMap[idx] = true
 	}
-	
+
 	indices = make([]int, 0, len(indexMap))
 	for idx := range indexMap {
 		indices = append(indices, idx)

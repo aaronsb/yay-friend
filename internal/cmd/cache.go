@@ -3,13 +3,13 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
-	"github.com/gookit/color"
+	"github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
 
 	"github.com/aaronsb/yay-friend/internal/cache"
+	"github.com/aaronsb/yay-friend/internal/ui"
 )
 
 // newCacheCmd creates the cache command
@@ -105,29 +105,26 @@ func runCacheStatus(ctx context.Context) error {
 		return fmt.Errorf("failed to get cache statistics: %w", err)
 	}
 
-	fmt.Printf("\n")
-	color.Bold.Printf("Cache Statistics\n")
-	fmt.Print(strings.Repeat("=", 40) + "\n")
-	
-	fmt.Printf("Total Packages: %d\n", stats.TotalPackages)
-	fmt.Printf("Total Analyses: %d\n", stats.TotalAnalyses)
-	fmt.Printf("Cache Size: %s\n", formatBytes(stats.CacheSize))
-	
+	ui.Blank()
+	fmt.Println(ui.Rule("cache"))
+	ui.Field("packages", fmt.Sprintf("%d", stats.TotalPackages))
+	ui.Field("analyses", fmt.Sprintf("%d", stats.TotalAnalyses))
+	ui.Field("size", humanize.Bytes(uint64(stats.CacheSize)))
+
 	if !stats.OldestEntry.IsZero() {
-		fmt.Printf("Oldest Entry: %s\n", stats.OldestEntry.Format("2006-01-02 15:04:05"))
+		ui.Field("oldest", humanize.Time(stats.OldestEntry))
 	}
 	if !stats.NewestEntry.IsZero() {
-		fmt.Printf("Newest Entry: %s\n", stats.NewestEntry.Format("2006-01-02 15:04:05"))
+		ui.Field("newest", humanize.Time(stats.NewestEntry))
 	}
-	
+
 	if stats.RecentHits > 0 || stats.RecentMisses > 0 {
 		total := stats.RecentHits + stats.RecentMisses
 		hitRate := float64(stats.RecentHits) / float64(total) * 100
-		fmt.Printf("Hit Rate: %.1f%% (%d hits, %d misses)\n", 
-			hitRate, stats.RecentHits, stats.RecentMisses)
+		ui.Field("hit rate", fmt.Sprintf("%.1f%% (%d hits, %d misses)",
+			hitRate, stats.RecentHits, stats.RecentMisses))
 	}
-
-	fmt.Printf("\n")
+	ui.Blank()
 
 	return nil
 }
@@ -138,24 +135,24 @@ func runCacheClean(ctx context.Context, days int) error {
 		return fmt.Errorf("failed to initialize cache manager: %w", err)
 	}
 
-	fmt.Printf("🧹 Cleaning cache entries older than %d days...\n", days)
-	
+	ui.Say("cleaning cache entries older than %d days", days)
+
 	maxAge := time.Duration(days) * 24 * time.Hour
 	if err := cacheManager.CleanExpiredCache(maxAge); err != nil {
 		return fmt.Errorf("failed to clean cache: %w", err)
 	}
 
-	fmt.Printf("✅ Cache cleaning completed\n")
+	ui.Say("cache cleaning completed")
 	return nil
 }
 
 func runCacheClear(ctx context.Context, confirm bool) error {
 	if !confirm {
-		fmt.Print("This will remove ALL cached analysis results. Continue? [y/N]: ")
+		ui.Ask("this will remove ALL cached analysis results. continue? [y/N]: ")
 		var response string
 		fmt.Scanln(&response)
 		if response != "y" && response != "Y" {
-			fmt.Println("Operation cancelled")
+			ui.Say("operation cancelled")
 			return nil
 		}
 	}
@@ -165,14 +162,14 @@ func runCacheClear(ctx context.Context, confirm bool) error {
 		return fmt.Errorf("failed to initialize cache manager: %w", err)
 	}
 
-	fmt.Printf("🗑️  Clearing all cache entries...\n")
-	
+	ui.Say("clearing all cache entries")
+
 	// Clean all entries (0 days = everything)
 	if err := cacheManager.CleanExpiredCache(0); err != nil {
 		return fmt.Errorf("failed to clear cache: %w", err)
 	}
 
-	fmt.Printf("✅ All cache entries cleared\n")
+	ui.Say("all cache entries cleared")
 	return nil
 }
 
@@ -188,50 +185,35 @@ func runCacheShow(ctx context.Context, packageName string) error {
 	}
 
 	if len(versions) == 0 {
-		fmt.Printf("No cached analyses found for package '%s'\n", packageName)
+		ui.Say("no cached analyses found for %q", packageName)
 		return nil
 	}
 
-	fmt.Printf("\n")
-	color.Bold.Printf("Cached Analyses for %s\n", packageName)
-	fmt.Print(strings.Repeat("=", 40) + "\n")
+	ui.Blank()
+	fmt.Println(ui.Rule("cached analyses for " + packageName))
 
-	for i, commitHash := range versions {
+	for _, commitHash := range versions {
 		analysis, err := cacheManager.GetCachedAnalysis(packageName, commitHash)
 		if err != nil {
-			fmt.Printf("%d. %s (error reading cache)\n", i+1, commitHash[:8])
+			ui.Bullet("%s (error reading cache)", commitHash[:8])
 			continue
 		}
 
-		fmt.Printf("%d. Commit: %s\n", i+1, commitHash[:8])
-		fmt.Printf("   Level: %s\n", analysis.OverallLevel.String())
-		fmt.Printf("   Provider: %s\n", analysis.Provider)
-		fmt.Printf("   Analyzed: %s\n", analysis.AnalyzedAt.Format("2006-01-02 15:04:05"))
+		ui.Blank()
+		fmt.Printf("  %s  %s\n", ui.Mark(analysis.OverallLevel), commitHash[:8])
+		ui.Field("provider", analysis.Provider)
+		ui.Field("analyzed", humanize.Time(analysis.AnalyzedAt))
 		if analysis.Summary != "" {
 			// Truncate long summaries
 			summary := analysis.Summary
 			if len(summary) > 100 {
 				summary = summary[:97] + "..."
 			}
-			fmt.Printf("   Summary: %s\n", summary)
+			ui.Field("summary", summary)
 		}
-		fmt.Printf("   Findings: %d\n", len(analysis.Findings))
+		ui.Field("findings", fmt.Sprintf("%d", len(analysis.Findings)))
 		fmt.Println()
 	}
 
 	return nil
-}
-
-// formatBytes formats a byte count into a human-readable string
-func formatBytes(bytes int64) string {
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	div, exp := int64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }

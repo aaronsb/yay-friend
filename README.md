@@ -2,34 +2,41 @@
 
 A security-focused wrapper around `yay` that uses AI to analyze PKGBUILD files for **security entropy** - the unpredictability and uncertainty factors that might indicate security risks.
 
-## 🎯 Overview
+## Overview
 
 `yay-friend` acts as your intelligent security companion for the Arch User Repository (AUR). It analyzes packages using **Security Entropy Analysis** - a fuzzy, multi-factor approach that considers how predictable vs chaotic a package's behavior is.
 
-### 🧠 The Security Entropy Concept
+### The Security Entropy Concept
 
 **Entropy** = Unpredictability + Uncertainty = Potential Risk
 
-- **🟢 Minimal Entropy**: Predictable, simple repackaging from official sources
-- **🟢 Low Entropy**: Minor uncertainty, standard operations  
-- **🟡 Moderate Entropy**: Some concerning factors, needs review
-- **🔴 High Entropy**: Multiple suspicious factors, high uncertainty
-- **🔴 Critical Entropy**: Maximum chaos - compilation + multiple sources + obfuscation (bold red)
+Five levels, shown as a bar that rises with entropy. The bar carries the scale on
+its own, so the reading survives `NO_COLOR` and a monochrome terminal:
 
-## 🎬 Demo
+```
+▁ MINIMAL    predictable — simple repackaging from official sources
+▃ LOW        minor uncertainty, standard operations
+▅ MODERATE   some concerning factors, worth a read
+▇ HIGH       multiple suspicious factors, high uncertainty
+█ CRITICAL   compilation + multiple sources + obfuscation
+```
+
+High entropy is not a verdict of "malicious". It means *pay attention*.
+
+## Demo
 
 ![yay-friend Demo](docs/examples/asciinema/demo.gif)
 
-## ✨ Features
+## Features
 
-- 🌪️ **Security Entropy Analysis** - Multi-factor risk assessment using AI
-- 🤖 **Claude Code Powered** - Runs your local Claude Code headless; no API key required (Qwen/Copilot/Goose providers are stubbed for the future — see [#1](https://github.com/aaronsb/yay-friend/issues/1))
-- 🔒 **Locked-down analysis** - Isolated Claude call with built-in tools denied (defense-in-depth), so untrusted PKGBUILDs are read, not executed
-- 📊 **Comprehensive Analysis** - Source compilation, multiple origins, maintainer trust
-- ⚡ **Intelligent Caching** - Commit-hash based analysis caching for performance
-- 🔧 **Developer Tools** - Test commands, configuration management
+- **Security Entropy Analysis** - Multi-factor risk assessment using AI
+- **Claude Code Powered** - Runs your local Claude Code headless; no API key required (Qwen/Copilot/Goose providers are stubbed for the future — see [#1](https://github.com/aaronsb/yay-friend/issues/1))
+- **Locked-down analysis** - Isolated Claude call with built-in tools denied (defense-in-depth), so untrusted PKGBUILDs are read, not executed
+- **Comprehensive Analysis** - Source compilation, multiple origins, maintainer trust
+- **Intelligent Caching** - Commit-hash based analysis caching for performance
+- **Developer Tools** - Test commands, configuration management
 
-## 🚀 Installation
+## Installation
 
 ### From the AUR (recommended)
 ```bash
@@ -50,6 +57,13 @@ curl -sSL https://raw.githubusercontent.com/aaronsb/yay-friend/main/install.sh |
 curl -sSL https://raw.githubusercontent.com/aaronsb/yay-friend/main/install.sh | bash -s -- --system
 ```
 
+### Dependencies
+
+Building needs Go 1.23 or newer. Runtime dependencies are `git`, `yay`, and a
+`claude` CLI on `PATH`. The binary links a small set of Go modules:
+`mvdan.cc/sh` (parses PKGBUILDs as bash rather than pattern-matching them),
+`lipgloss`/`termenv` (terminal rendering), `cobra`, and `yaml.v3`.
+
 ### Build from Source
 ```bash
 git clone https://github.com/aaronsb/yay-friend
@@ -58,7 +72,7 @@ go build -o yay-friend ./cmd/yay-friend
 ./install.sh --user --build
 ```
 
-## 🔑 Authentication & Cost
+## Authentication & Cost
 
 `yay-friend` does **not** talk to any AI API directly. For each package it shells
 out to your **locally installed Claude Code** in headless mode (`claude --print`)
@@ -88,7 +102,7 @@ and reads back the analysis. This has a few important consequences:
 > **Prerequisite:** Install and sign in to [Claude Code](https://claude.com/claude-code)
 > first (`claude` must be on your `PATH`). Verify with `yay-friend provider test claude`.
 
-## 📋 Usage
+## Usage
 
 ### Basic Analysis
 ```bash
@@ -142,10 +156,10 @@ yay-friend cache clear -y
 ```
 
 #### Cache Benefits
-- **⚡ 95%+ faster** for previously analyzed packages (no AI call needed)
-- **💰 Cost reduction** - Unchanged packages cost nothing; no repeat Claude usage
-- **🔄 Consistency** - Identical analysis results for same package version
-- **📱 Offline capability** - Re-analyze previously seen packages offline
+- **95%+ faster** for previously analyzed packages (no AI call needed)
+- **Cost reduction** - Unchanged packages cost nothing; no repeat Claude usage
+- **Consistency** - Identical analysis results for same package version
+- **Offline capability** - Re-analyze previously seen packages offline
 
 The cache uses XDG Base Directory specification:
 - Cache location: `${XDG_DATA_HOME:-$HOME/.local/share}/yay-friend/cache/`
@@ -177,85 +191,73 @@ yay-friend config init
 
 The prompt template is stored in the `prompts.security_analysis` field in your config file.
 
-## 🔍 Example Analysis Output
+## Example Analysis Output
 
-Here's what a real analysis looks like - notice the **transparency** about what data we collect:
+Note the transparency about what gets collected before anything is sent:
 
 ```
-🔍 Analyzing hello with claude...
+:: analyzing hello with claude
 
-Collected for Analysis:
-─────────────────────────
-• PKGBUILD: 28 lines of shell script
-• Package metadata: hello v2.12.1 by Matthew Sexton <mssxtn@gmail.com
+── collected for analysis ──────────────────────────────────────────────
+  pkgbuild        28 lines of shell
+  package         hello 2.12.1
+  maintainer      Matthew Sexton <mssxtn@gmail.com>
+  runtime deps    glibc
+  aur history     submitted 2019-03-02, updated 2026-07-29
 
-Analyzing with Claude...
-Analysis complete.
+:: analyzing with Claude… (4s, receiving)
+:: analysis complete (6s)
 
-============================================================
-Security Analysis for hello
-============================================================
-Provider: claude
-Analyzed: 2025-07-31 20:26:15
-Overall Level: LOW
+── hello ───────────────────────────────────────────────────────────────
+  entropy         ▃ LOW
+  predictability  0.81
+  factors         source compilation, weak checksums
+  provider        claude
+  analyzed        2026-08-03 14:27:02
 
-Summary:
-This PKGBUILD represents a low-risk package for the official GNU Hello World program. The primary entropy factors are source compilation (standard for GNU software) and weak MD5 checksums. The package follows standard practices with official sources and clean build processes, though low community engagement raises minor maintenance concerns.
+  Low-risk package for the official GNU Hello World program. Entropy comes
+  from source compilation, standard for GNU software, and MD5 checksums.
 
-Recommendation: PROCEED
+  recommend       PROCEED
 
-Detailed Findings:
-----------------------------------------
-1. [MINIMAL] source_analysis
-   Single source from official GNU FTP server for well-established GNU Hello World program
-   Line: 11
-   Context: source=(https://ftp.gnu.org/gnu/hello/$pkgname-$pkgver.tar.gz)
-   💡 Source is trustworthy - official GNU software repository. Consider upgrading to SHA256 checksums instead of MD5 for better integrity verification.
+── findings ────────────────────────────────────────────────────────────
 
-2. [LOW] source_analysis
-   Uses MD5 checksums instead of stronger SHA256 for integrity verification
-   Line: 12
-   Context: md5sums=('5cf598783b9541527e17c9b5e525b7eb')
-   💡 Upgrade to SHA256 checksums for better cryptographic security: sha256sums=('hash')
+  1. ▁ MINIMAL  source_analysis  line 11
+     Single source from the official GNU FTP server.
+     code source=(https://ftp.gnu.org/gnu/hello/$pkgname-$pkgver.tar.gz)
+     do   Trustworthy source. Consider SHA256 over MD5 for integrity.
 
-3. [LOW] build_process
-   Source compilation using standard autotools build process instead of simple repackaging
-   Line: 15
-   Context: ./configure --prefix=/usr
-make
-   💡 Build process is standard for GNU software. No additional verification needed - autotools is well-established and secure.
+  2. ▃ LOW  source_analysis  line 12
+     Uses MD5 checksums rather than SHA256.
+     code md5sums=('5cf598783b9541527e17c9b5e525b7eb')
+     do   Upgrade to sha256sums for cryptographic integrity.
 
-4. [MINIMAL] file_operations
-   Clean installation using standard make install with proper DESTDIR usage
-   Line: 19
-   Context: make DESTDIR="$pkgdir/" install
-   💡 File operations are properly contained within package directory. No concerns.
-
-5. [MODERATE] maintainer_trust
-   Multiple contributors over time but package has 0 votes and 0.000 popularity in AUR
-   Line: 3
-   Context: # Maintainer: Matthew Sexton <mssxtn@gmail.com
-#contributor: Michał Wojdyła < micwoj9292 at gmail dot com >
-#Contributor: leo <leotemplin@yahoo.de>
-   💡 Low community engagement despite being official GNU software suggests limited usage. Verify this is needed vs using official repository version.
+  3. ▅ MODERATE  maintainer_trust  line 3
+     Multiple contributors over time, but 0 votes and 0.000 popularity.
+     why  Low engagement on official GNU software suggests limited usage.
+     do   Verify this is needed versus the official repository version.
 ```
 
-## 🔍 Security Analysis Criteria
+Every line yay-friend speaks is prefixed `::`. That marker is reserved: output
+from `yay`, from `pacman`, and from the package's own build is not allowed to
+wear it, so you can always tell which lines came from the analyzer.
 
-### 🌪️ High Entropy Indicators (Suspicious)
+## Security Analysis Criteria
+
+### High Entropy Indicators (Suspicious)
 - **Source Compilation**: Arbitrary code execution during build
 - **Multiple Sources**: Each source multiplies attack surface  
 - **Network Requests**: Downloads during build process
 - **Code Obfuscation**: Base64, eval, compressed scripts
 - **New Maintainers**: Recent accounts with low reputation
 
-### 🛡️ Low Entropy Indicators (Safer)
+### Low Entropy Indicators (Safer)
 - **Simple Repackaging**: Just extracting and moving files
 - **Official Sources**: Well-known, trusted repositories
 - **Established Maintainers**: Long history, good reputation
 - **Regular Updates**: Consistent maintenance patterns
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
@@ -271,11 +273,11 @@ make
 ```
 
 ### Core Components
-- **🧠 Entropy Analysis Engine**: Multi-factor security assessment
-- **🔌 Provider Interface**: Modular AI backend system
-- **⚙️ Configuration Management**: User preferences and thresholds
+- **Entropy Analysis Engine**: Multi-factor security assessment
+- **Provider Interface**: Modular AI backend system
+- **Configuration Management**: User preferences and thresholds
 
-## 📁 Directory Structure
+## Directory Structure
 
 XDG Base Directory compliant:
 
@@ -287,7 +289,7 @@ ${XDG_DATA_HOME:-$HOME/.local/share}/yay-friend/
 └── cache/               # Analysis results, keyed by AUR commit hash
 ```
 
-## 🔧 Configuration
+## Configuration
 
 ### Security Thresholds
 ```yaml
@@ -320,7 +322,7 @@ claude:
 > edit the file. Note the overlay merges map entries (a partial `providers:` keeps the
 > untouched defaults) but replaces lists wholesale.
 
-## 🧪 Development & Testing
+## Development & Testing
 
 ```bash
 # Analyze packages without installing
@@ -337,15 +339,16 @@ yay-friend cache status
 yay-friend cache show hello
 ```
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions! Focus areas:
 
-1. **🔌 New AI Providers**: Implement additional AI backends
-2. **🎨 TUI Interface**: Rich terminal interface with colors
-3. **🛡️ Sandboxing**: Isolated PKGBUILD analysis environment  
-4. **📊 Analytics**: Enhanced trust scoring algorithms
-5. **🔍 Detection Rules**: New entropy analysis patterns
+1. **New AI Providers**: implement additional AI backends
+2. **Sandboxing**: isolated PKGBUILD evaluation, so computed metadata can be
+   resolved without trusting it — see the notes in `internal/ui` and
+   `internal/pkgbuild` for why static analysis alone cannot reach it
+3. **Detection Rules**: new entropy analysis patterns
+4. **Trust signals**: repository age and maintainer reputation
 
 ### Development Setup
 ```bash
@@ -356,45 +359,17 @@ go build -o yay-friend ./cmd/yay-friend
 ./yay-friend config init
 ```
 
-## 📊 Example Analysis Output
-
-```
-🧪 Testing analysis pipeline with package: hello
-🔑 Authenticating with claude...
-📦 Fetching package information for hello...
-
-============================================================
-TEST ANALYSIS RESULTS  
-============================================================
-Package: hello
-Provider: claude
-Overall Entropy: LOW
-Predictability Score: 0.85
-Recommendation: PROCEED
-
-Summary:
-Simple repackaging from official GNU source with standard build process.
-
-Entropy Factors:
-  • Official GNU source (reduces uncertainty)
-  • Standard autotools build (predictable)
-  • Long-term maintenance history
-  • No network requests during build
-
-✅ No security issues found!
-```
-
-## 🛡️ Security Philosophy
+## Security Philosophy
 
 `yay-friend` doesn't just look for "bad" vs "good" packages. Instead, it analyzes **uncertainty** and **unpredictability** - the entropy that makes it hard to predict what a package will actually do.
 
 **High entropy doesn't mean malicious, but it means "pay attention".**
 
-## 📜 License
+## License
 
 MIT License - see [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - Inspired by the need for better AUR security practices
 - Built on the excellent `yay` AUR helper  

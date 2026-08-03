@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/aaronsb/yay-friend/internal/config"
+	"github.com/aaronsb/yay-friend/internal/ui"
 )
 
 // newConfigCmd creates the config command
@@ -45,20 +46,23 @@ func newConfigShowCmd() *cobra.Command {
 				return fmt.Errorf("failed to load config: %w", err)
 			}
 
-			fmt.Println("Current Configuration:")
-			fmt.Printf("Default Provider: %s\n", cfg.DefaultProvider)
-			fmt.Printf("Claude Model: %s\n", cfg.Claude.Model)
-			fmt.Printf("Security Thresholds:\n")
-			fmt.Printf("  Block Level: %s\n", cfg.SecurityThresholds.BlockLevel.String())
-			fmt.Printf("  Warn Level: %s\n", cfg.SecurityThresholds.WarnLevel.String())
-			fmt.Printf("  Auto Proceed: %v\n", cfg.SecurityThresholds.AutoProceed)
-			fmt.Printf("UI Settings:\n")
-			fmt.Printf("  Show Details: %v\n", cfg.UI.ShowDetails)
-			fmt.Printf("  Use Colors: %v\n", cfg.UI.UseColors)
-			fmt.Printf("  Verbose Output: %v\n", cfg.UI.VerboseOutput)
-			fmt.Printf("Yay Settings:\n")
-			fmt.Printf("  Path: %s\n", cfg.Yay.Path)
-			fmt.Printf("  Default Flags: %v\n", cfg.Yay.Flags)
+			ui.Blank()
+			fmt.Println(ui.Rule("configuration"))
+			ui.Field("provider", cfg.DefaultProvider)
+			ui.Field("claude model", cfg.Claude.Model)
+
+			ui.Field("block at", ui.Mark(cfg.SecurityThresholds.BlockLevel))
+			ui.Field("warn at", ui.Mark(cfg.SecurityThresholds.WarnLevel))
+			ui.Blank()
+			fmt.Print(ui.Legend())
+			ui.Field("auto proceed", fmt.Sprintf("%v", cfg.SecurityThresholds.AutoProceed))
+
+			ui.Field("show details", fmt.Sprintf("%v", cfg.UI.ShowDetails))
+			ui.Field("use colors", fmt.Sprintf("%v", cfg.UI.UseColors))
+			ui.Field("verbose", fmt.Sprintf("%v", cfg.UI.VerboseOutput))
+
+			ui.Field("yay path", cfg.Yay.Path)
+			ui.Field("yay flags", fmt.Sprintf("%v", cfg.Yay.Flags))
 
 			return nil
 		},
@@ -79,7 +83,7 @@ func newConfigSetCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Printf("Set %s = %s\n", key, value)
+			ui.Say("set %s = %s", key, value)
 			return nil
 		},
 	}

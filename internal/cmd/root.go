@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gookit/color"
 	"github.com/spf13/cobra"
 
 	"github.com/aaronsb/yay-friend/internal/aur"
@@ -13,6 +12,7 @@ import (
 	"github.com/aaronsb/yay-friend/internal/config"
 	"github.com/aaronsb/yay-friend/internal/providers"
 	"github.com/aaronsb/yay-friend/internal/types"
+	"github.com/aaronsb/yay-friend/internal/ui"
 	"github.com/aaronsb/yay-friend/internal/yay"
 )
 
@@ -22,6 +22,7 @@ var (
 	skipAnalysis bool
 	provider     string
 	noSpinner    bool
+	noColor      bool
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -60,6 +61,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&skipAnalysis, "skip-analysis", false, "skip security analysis and proceed directly to yay")
 	rootCmd.PersistentFlags().StringVar(&provider, "provider", "", "AI provider to use (claude, qwen, copilot, goose)")
 	rootCmd.PersistentFlags().BoolVar(&noSpinner, "no-spinner", false, "disable spinner animations (useful for scripts/automation)")
+	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "disable colored output (NO_COLOR is also honored)")
 
 	// Add yay-compatible flags
 	rootCmd.Flags().BoolP("sync", "S", false, "install packages")
@@ -79,9 +81,19 @@ func init() {
 }
 
 // initConfig wires the --config flag into the config package so that
-// config.Load reads from the requested file (or the default path when empty).
+// config.Load reads from the requested file (or the default path when empty),
+// then settles colour output before anything prints.
 func initConfig() {
 	config.SetConfigPath(cfgFile)
+
+	// Colour has to be decided before the first rendered byte. A config that
+	// will not load must not prevent that, so fall back to permitting colour
+	// and let the TTY check in ui.Configure have the last word.
+	useColors := true
+	if cfg, err := config.Load(); err == nil {
+		useColors = cfg.UI.UseColors
+	}
+	ui.Configure(noColor, useColors)
 }
 
 // runInstall handles the main package installation workflow
@@ -94,8 +106,8 @@ func runInstall(ctx context.Context, args []string) error {
 
 	// Debug config loading - only show in verbose mode
 	if verbose {
-		fmt.Printf("Config Debug - Default Provider: %s, Block Level: %d, Warn Level: %d\n",
-			cfg.DefaultProvider, int(cfg.SecurityThresholds.BlockLevel), int(cfg.SecurityThresholds.WarnLevel))
+		ui.Field("config", fmt.Sprintf("provider %s, block %s, warn %s",
+			cfg.DefaultProvider, cfg.SecurityThresholds.BlockLevel, cfg.SecurityThresholds.WarnLevel))
 	}
 
 	// Parse yay command
@@ -131,7 +143,7 @@ func runInstall(ctx context.Context, args []string) error {
 		_, err := yayClient.GetPackageInfo(ctx, pkg)
 		if err != nil {
 			// Package not found directly, might be a search query
-			fmt.Printf("🔍 Package '%s' not found exactly, searching...\n", pkg)
+			ui.Say("package %q not found exactly, searching", pkg)
 
 			// Search for packages
 			searchResults, searchErr := yayClient.SearchPackages(ctx, pkg)
@@ -150,7 +162,7 @@ func runInstall(ctx context.Context, args []string) error {
 			}
 
 			if len(selectedPkgs) == 0 {
-				fmt.Println("Selection cancelled")
+				ui.Say("selection cancelled")
 				return nil
 			}
 
@@ -204,8 +216,9 @@ func runInstall(ctx context.Context, args []string) error {
 	if operation.Operation == "analyze" {
 		// In analyze-only mode, ask user if they want to proceed with installation
 		if allSafe {
-			fmt.Printf("\n✅ All packages passed security analysis.\n")
-			fmt.Printf("Would you like to proceed with installation? [y/N]: ")
+			ui.Blank()
+			ui.Say("all packages passed security analysis")
+			ui.Ask("proceed with installation? [y/N]: ")
 
 			var response string
 			fmt.Scanln(&response)
@@ -215,26 +228,27 @@ func runInstall(ctx context.Context, args []string) error {
 				// Change operation to install and proceed
 				operation.Command = "-S"
 				operation.Operation = "install"
-				fmt.Printf("Proceeding with installation...\n")
+				ui.Say("proceeding with installation")
 				return yayClient.InstallPackages(ctx, operation)
 			} else {
-				fmt.Printf("Installation cancelled.\n")
+				ui.Say("installation cancelled")
 				return nil
 			}
 		} else {
-			fmt.Printf("\n⚠️  Security concerns found. Installation not recommended.\n")
+			ui.Blank()
+			ui.Say("security concerns found; installation not recommended")
 			return nil
 		}
 	} else {
 		// Regular install mode, proceed automatically if safe
-		fmt.Printf("✅ All packages passed security analysis, proceeding with installation...\n")
+		ui.Say("all packages passed security analysis, proceeding with installation")
 		return yayClient.InstallPackages(ctx, operation)
 	}
 }
 
 // analyzeAndDecide analyzes a package and decides whether to proceed
 func analyzeAndDecide(ctx context.Context, yayClient *yay.YayClient, provider types.AIProvider, packageName string, cfg *types.Config) error {
-	fmt.Printf("Analyzing %s...\n", packageName)
+	ui.Say("analyzing %s", packageName)
 
 	// Get package info
 	pkgInfo, err := yayClient.GetPackageInfo(ctx, packageName)
@@ -243,19 +257,19 @@ func analyzeAndDecide(ctx context.Context, yayClient *yay.YayClient, provider ty
 	}
 
 	// Fetch additional AUR context (including commit hash)
-	fmt.Printf("Fetching AUR context...\n")
+	ui.Say("fetching AUR context")
 	aurFetcher := aur.NewAURFetcher()
 	if err := aurFetcher.EnrichPackageInfo(ctx, pkgInfo); err != nil {
-		fmt.Printf("Warning: Could not enrich with AUR context: %v\n", err)
+		ui.Warn("could not enrich with AUR context: %v", err)
 	} else {
-		fmt.Printf("AUR context: %d votes, %.3f popularity, %d comments\n",
+		ui.Say("AUR context: %d votes, %.3f popularity, %d comments",
 			pkgInfo.Votes, pkgInfo.Popularity, len(pkgInfo.Comments))
 	}
 
 	// Initialize cache manager
 	cacheManager, err := cache.NewCacheManager()
 	if err != nil {
-		fmt.Printf("Warning: Could not initialize cache: %v\n", err)
+		ui.Warn("could not initialize cache: %v", err)
 		// Continue without caching
 	}
 
@@ -264,10 +278,10 @@ func analyzeAndDecide(ctx context.Context, yayClient *yay.YayClient, provider ty
 	if cfg.Cache.Enabled && cacheManager != nil && pkgInfo.CommitHash != "" {
 		cachedAnalysis, cacheErr := cacheManager.GetCachedAnalysis(pkgInfo.Name, pkgInfo.CommitHash)
 		if cacheErr == nil {
-			fmt.Printf("📋 Using cached analysis (commit: %s)\n", pkgInfo.CommitHash[:8])
+			ui.Say("using cached analysis (commit %s)", pkgInfo.CommitHash[:8])
 			analysis = cachedAnalysis
 		} else {
-			fmt.Printf("🤖 Running fresh analysis (commit: %s)\n", pkgInfo.CommitHash[:8])
+			ui.Say("running fresh analysis (commit %s)", pkgInfo.CommitHash[:8])
 			// Cache miss - continue to run AI analysis
 		}
 	}
@@ -275,7 +289,7 @@ func analyzeAndDecide(ctx context.Context, yayClient *yay.YayClient, provider ty
 	// If no cached analysis found, run AI analysis
 	if analysis == nil {
 		// Display what we collected for analysis
-		displayCollectedData(pkgInfo)
+		ui.RenderCollected(pkgInfo)
 
 		// Analyze security with enriched context
 		// Check if provider supports options (for Claude)
@@ -292,7 +306,7 @@ func analyzeAndDecide(ctx context.Context, yayClient *yay.YayClient, provider ty
 		// Save to cache if enabled and available
 		if cfg.Cache.Enabled && cacheManager != nil && pkgInfo.CommitHash != "" {
 			if cacheErr := cacheManager.SaveAnalysis(pkgInfo.Name, pkgInfo.CommitHash, analysis); cacheErr != nil {
-				fmt.Printf("Warning: Could not save analysis to cache: %v\n", cacheErr)
+				ui.Warn("could not save analysis to cache: %v", cacheErr)
 			}
 		}
 	}
@@ -303,95 +317,28 @@ func analyzeAndDecide(ctx context.Context, yayClient *yay.YayClient, provider ty
 
 // handleAnalysisResult processes the analysis result and makes a decision
 func handleAnalysisResult(analysis *types.SecurityAnalysis, cfg *types.Config) error {
-	// Display analysis summary with better formatting
-	fmt.Print("\n" + strings.Repeat("=", 60) + "\n")
-	color.Bold.Print("Security Analysis Results: ")
-	color.Magenta.Printf("%s\n", analysis.PackageName)
-	fmt.Print(strings.Repeat("=", 60) + "\n")
+	ui.RenderAnalysis(analysis, false)
 
-	// Display entropy level with color coding
-	entropyIcon := getEntropyIcon(analysis.OverallLevel)
-	fmt.Printf("Security Entropy: %s %s\n", entropyIcon, analysis.OverallLevel.String())
-
-	if analysis.PredictabilityScore > 0 {
-		fmt.Printf("Predictability Score: %.2f/1.0\n", analysis.PredictabilityScore)
-	}
-
-	if len(analysis.EntropyFactors) > 0 {
-		fmt.Printf("Risk Factors: %s\n", strings.Join(analysis.EntropyFactors, ", "))
-	}
-
-	fmt.Printf("Summary: %s\n", analysis.Summary)
-
-	// Show educational content
-	if analysis.EducationalSummary != "" {
-		fmt.Printf("\n")
-		color.Bold.Printf("Security Education:\n")
-		fmt.Print(strings.Repeat("-", 60) + "\n")
-		fmt.Printf("%s\n", analysis.EducationalSummary)
-	}
-
-	if len(analysis.SecurityLessons) > 0 {
-		fmt.Printf("\n")
-		color.Bold.Printf("Key Security Lessons:\n")
-		for i, lesson := range analysis.SecurityLessons {
-			fmt.Printf("   %d. %s\n", i+1, lesson)
-		}
-	}
-
-	// Debug threshold comparison (only show if verbose mode)
 	if verbose {
-		fmt.Printf("\nDebug - Analysis Level: %d (%s), Block Threshold: %d (%s), Warn Threshold: %d (%s)\n",
-			int(analysis.OverallLevel), analysis.OverallLevel.String(),
-			int(cfg.SecurityThresholds.BlockLevel), cfg.SecurityThresholds.BlockLevel.String(),
-			int(cfg.SecurityThresholds.WarnLevel), cfg.SecurityThresholds.WarnLevel.String())
+		ui.Blank()
+		ui.Field("thresholds", fmt.Sprintf("level %s, block at %s, warn at %s",
+			analysis.OverallLevel, cfg.SecurityThresholds.BlockLevel, cfg.SecurityThresholds.WarnLevel))
 	}
 
-	// Check against thresholds
 	if analysis.OverallLevel >= cfg.SecurityThresholds.BlockLevel {
-		fmt.Printf("\nBLOCKED: Package security level (%s) exceeds block threshold (%s)\n",
-			analysis.OverallLevel.String(), cfg.SecurityThresholds.BlockLevel.String())
+		ui.Blank()
+		ui.Say("%s blocked: %s entropy exceeds the %s threshold",
+			analysis.PackageName, analysis.OverallLevel, cfg.SecurityThresholds.BlockLevel)
 		return fmt.Errorf("package %s blocked by security policy", analysis.PackageName)
 	}
 
-	// Show detailed findings
-	if len(analysis.Findings) > 0 {
-		fmt.Printf("\n")
-		color.Bold.Printf("Detailed Security Analysis:\n")
-		fmt.Print(strings.Repeat("-", 60) + "\n")
-		for i, finding := range analysis.Findings {
-			icon := getEntropyIcon(finding.Entropy)
-			entropyColor := getEntropyColor(finding.Entropy)
-			fmt.Printf("%d. %s ", i+1, icon)
-			entropyColor.Printf("[%s] ", finding.Entropy.String())
-			fmt.Printf("%s\n", finding.Type)
-			fmt.Printf("   Description: %s\n", finding.Description)
-
-			if finding.Context != "" {
-				fmt.Printf("   Code: %s\n", finding.Context)
-			}
-
-			if finding.EntropyNotes != "" {
-				fmt.Printf("   Analysis: %s\n", finding.EntropyNotes)
-			}
-
-			if finding.Suggestion != "" {
-				fmt.Printf("   Action: %s\n", finding.Suggestion)
-			}
-
-			if finding.LineNumber > 0 {
-				fmt.Printf("   Line: %d\n", finding.LineNumber)
-			}
-			fmt.Println()
-		}
-	}
-
 	if analysis.OverallLevel >= cfg.SecurityThresholds.WarnLevel {
-		fmt.Printf("\nWARNING: Security concerns detected (%s entropy level)\n", analysis.OverallLevel.String())
+		ui.Blank()
+		ui.Say("%s entropy is %s, at or above the warn threshold", analysis.PackageName, analysis.OverallLevel)
 
 		// Ask user for confirmation unless auto-proceed is enabled
 		if !cfg.SecurityThresholds.AutoProceed {
-			fmt.Print("\nContinue with installation? [y/N]: ")
+			ui.Ask("continue with installation? [y/N]: ")
 			var response string
 			fmt.Scanln(&response)
 			if response != "y" && response != "Y" {
@@ -400,93 +347,7 @@ func handleAnalysisResult(analysis *types.SecurityAnalysis, cfg *types.Config) e
 		}
 	}
 
-	fmt.Printf("\n%s approved for installation\n", analysis.PackageName)
+	ui.Blank()
+	ui.Say("%s approved for installation", analysis.PackageName)
 	return nil
-}
-
-// getEntropyIcon returns an icon based on entropy level
-func getEntropyIcon(level types.SecurityEntropy) string {
-	switch level {
-	case types.EntropyMinimal:
-		return "🟢"
-	case types.EntropyLow:
-		return "🟢"
-	case types.EntropyModerate:
-		return "🟡"
-	case types.EntropyHigh:
-		return "🔴"
-	case types.EntropyCritical:
-		return "🔴"
-	default:
-		return "❓"
-	}
-}
-
-// getEntropyColor returns a color style matching the entropy level
-func getEntropyColor(level types.SecurityEntropy) color.Style {
-	switch level {
-	case types.EntropyMinimal:
-		return color.New(color.FgGreen, color.OpBold)
-	case types.EntropyLow:
-		return color.New(color.FgGreen)
-	case types.EntropyModerate:
-		return color.New(color.FgYellow) // Yellow/orange color
-	case types.EntropyHigh:
-		return color.New(color.FgRed)
-	case types.EntropyCritical:
-		return color.New(color.FgRed, color.OpBold)
-	default:
-		return color.New(color.FgDarkGray)
-	}
-}
-
-// displayCollectedData shows what information we gathered for analysis
-func displayCollectedData(pkgInfo *types.PackageInfo) {
-	fmt.Printf("\n")
-	color.Bold.Printf("Collected for Analysis:\n")
-	fmt.Printf("─────────────────────────\n")
-
-	// PKGBUILD stats
-	pkgbuildLines := len(strings.Split(pkgInfo.PKGBUILD, "\n"))
-	fmt.Printf("• PKGBUILD: %d lines of shell script\n", pkgbuildLines)
-
-	// Package metadata
-	fmt.Printf("• Package metadata: %s v%s by %s\n", pkgInfo.Name, pkgInfo.Version, pkgInfo.Maintainer)
-
-	// Dependencies
-	if len(pkgInfo.Dependencies) > 0 {
-		fmt.Printf("• Runtime dependencies: %d packages (%s)\n",
-			len(pkgInfo.Dependencies), truncateList(pkgInfo.Dependencies, 3))
-	}
-	if len(pkgInfo.MakeDepends) > 0 {
-		fmt.Printf("• Build dependencies: %d packages (%s)\n",
-			len(pkgInfo.MakeDepends), truncateList(pkgInfo.MakeDepends, 3))
-	}
-
-	// AUR history
-	if pkgInfo.FirstSubmitted != "" && pkgInfo.LastUpdated != "" {
-		fmt.Printf("• AUR history: submitted %s, last updated %s\n",
-			pkgInfo.FirstSubmitted, pkgInfo.LastUpdated)
-	}
-
-	// Community engagement
-	if pkgInfo.Votes > 0 || pkgInfo.Popularity > 0 {
-		fmt.Printf("• Community: %d votes, %.3f popularity score\n",
-			pkgInfo.Votes, pkgInfo.Popularity)
-	}
-
-	// Optional dependencies
-	if len(pkgInfo.OptDepends) > 0 {
-		fmt.Printf("• Optional dependencies: %d packages\n", len(pkgInfo.OptDepends))
-	}
-
-	fmt.Printf("\n")
-}
-
-// truncateList truncates a string slice for display
-func truncateList(items []string, maxItems int) string {
-	if len(items) <= maxItems {
-		return strings.Join(items, ", ")
-	}
-	return strings.Join(items[:maxItems], ", ") + fmt.Sprintf(" (+%d more)", len(items)-maxItems)
 }

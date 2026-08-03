@@ -2,10 +2,12 @@ package cmd
 
 import (
 	"fmt"
+	"github.com/dustin/go-humanize"
 
 	"github.com/spf13/cobra"
 
 	"github.com/aaronsb/yay-friend/internal/providers"
+	"github.com/aaronsb/yay-friend/internal/ui"
 )
 
 // newProviderCmd creates the provider command
@@ -34,24 +36,25 @@ func newProviderListCmd() *cobra.Command {
 			registry.Register("copilot", providers.NewCopilotProvider())
 			registry.Register("goose", providers.NewGooseProvider())
 
-			fmt.Println("Available AI Providers:")
-			fmt.Println("======================")
+			ui.Blank()
+			fmt.Println(ui.Rule("providers"))
 
 			for _, name := range registry.List() {
 				provider, _ := registry.Get(name)
 				capabilities := provider.GetCapabilities()
-				
-				status := "❌ Not authenticated"
+
+				status := "not authenticated"
 				if provider.IsAuthenticated() {
-					status = "✅ Authenticated"
+					status = "authenticated"
 				}
 
-				fmt.Printf("Name: %s\n", name)
-				fmt.Printf("Status: %s\n", status)
-				fmt.Printf("Code Analysis: %v\n", capabilities.SupportsCodeAnalysis)
-				fmt.Printf("Explanations: %v\n", capabilities.SupportsExplanations)
-				fmt.Printf("Rate Limit: %d/min\n", capabilities.RateLimitPerMinute)
-				fmt.Printf("Max Analysis Size: %d bytes\n", capabilities.MaxAnalysisSize)
+				ui.Blank()
+				fmt.Printf("  %s\n", name)
+				ui.Field("status", status)
+				ui.Field("code analysis", fmt.Sprintf("%v", capabilities.SupportsCodeAnalysis))
+				ui.Field("explanations", fmt.Sprintf("%v", capabilities.SupportsExplanations))
+				ui.Field("rate limit", fmt.Sprintf("%d/min", capabilities.RateLimitPerMinute))
+				ui.Field("max size", humanize.Bytes(uint64(capabilities.MaxAnalysisSize)))
 				fmt.Println()
 			}
 
@@ -81,22 +84,22 @@ func newProviderTestCmd() *cobra.Command {
 					return err
 				}
 
-				fmt.Printf("Testing %s...\n", providerName)
+				ui.Say("testing %s", providerName)
 				if err := provider.Authenticate(cmd.Context()); err != nil {
-					fmt.Printf("❌ Authentication failed: %v\n", err)
+					ui.Warn("authentication failed: %v", err)
 					return err
 				}
-				fmt.Printf("✅ %s authentication successful\n", providerName)
+				ui.Say("%s authentication successful", providerName)
 			} else {
 				// Test all providers
-				fmt.Println("Testing all providers...")
+				ui.Say("testing all providers")
 				results := registry.AuthenticateAll(cmd.Context())
-				
+
 				for name, err := range results {
 					if err != nil {
-						fmt.Printf("❌ %s: %v\n", name, err)
+						ui.Warn("%s: %v", name, err)
 					} else {
-						fmt.Printf("✅ %s: Authentication successful\n", name)
+						ui.Say("%s: authentication successful", name)
 					}
 				}
 			}
