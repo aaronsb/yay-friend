@@ -16,6 +16,7 @@ package pkgbuild
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"mvdan.cc/sh/v3/syntax"
@@ -53,17 +54,43 @@ func Parse(src string) (*Vars, error) {
 			if a.Name == nil {
 				continue
 			}
+			name := a.Name.Value
 			switch {
 			case a.Array != nil:
-				vals := make([]string, 0, len(a.Array.Elems))
+				var vals []string
 				for _, el := range a.Array.Elems {
-					if el.Value != nil {
-						vals = append(vals, v.word(el.Value))
+					if el.Value == nil {
+						continue
 					}
+					text := v.word(el.Value)
+					// An unquoted expansion word-splits in bash:
+					// `depends=($_deps)` with _deps='a b' is two entries.
+					// Quoted text never splits, and a literal cannot contain
+					// whitespace -- the parser would already have split it.
+					if unquoted(el.Value) && strings.ContainsAny(text, " \t\n") {
+						vals = append(vals, strings.Fields(text)...)
+						continue
+					}
+					vals = append(vals, text)
 				}
-				v.arrays[a.Name.Value] = vals
+				// `depends+=(...)` extends the declaration; treating it as a
+				// plain assignment would silently drop everything declared
+				// before it, including source+= entries naming files that must
+				// reach the analyzer.
+				if a.Append {
+					v.arrays[name] = append(v.arrays[name], vals...)
+				} else {
+					v.arrays[name] = vals
+					delete(v.scalars, name) // a later array declaration wins
+				}
 			case a.Value != nil:
-				v.scalars[a.Name.Value] = v.word(a.Value)
+				val := v.word(a.Value)
+				if a.Append {
+					v.scalars[name] += val
+				} else {
+					v.scalars[name] = val
+					delete(v.arrays, name)
+				}
 			}
 		}
 	}
@@ -75,8 +102,18 @@ func Parse(src string) (*Vars, error) {
 // Str returns a scalar declaration, or "" if absent.
 func (v *Vars) Str(name string) string { return v.scalars[name] }
 
-// Slice returns an array declaration, or nil if absent.
-func (v *Vars) Slice(name string) []string { return v.arrays[name] }
+// Slice returns an array declaration, or nil if absent. A declaration written
+// in scalar form (`depends=glibc`, which makepkg reads as a one-element list)
+// is returned as a single element.
+func (v *Vars) Slice(name string) []string {
+	if arr, ok := v.arrays[name]; ok {
+		return arr
+	}
+	if s, ok := v.scalars[name]; ok && s != "" {
+		return []string{s}
+	}
+	return nil
+}
 
 // Name returns the package name. Split packages declare pkgname as an array
 // (`pkgname=('conan')`), in which case the first entry is the primary name; the
@@ -108,21 +145,57 @@ var remoteSchemes = []string{
 // `google-chrome-$_channel.sh` is returned as `google-chrome-stable.sh` -- the
 // case the previous implementation special-cased by substituting `$_channel` by
 // hand.
+// Entries are restricted to plain filenames. makepkg requires a local source to
+// sit beside the PKGBUILD, so anything carrying a path component is malformed --
+// and honouring it would let a hostile PKGBUILD name `../../../.ssh/id_rsa` and
+// have its contents collected for analysis.
 func (v *Vars) LocalSources() []string {
 	var out []string
-	for _, entry := range v.arrays["source"] {
+	seen := map[string]bool{}
+	for _, entry := range v.sourceEntries() {
 		target := entry
 		if _, after, found := strings.Cut(entry, "::"); found {
 			target = after
 		}
-		if isRemote(target) {
+		// `local://foo.patch` names a file beside the PKGBUILD (simavr uses it).
+		target = strings.TrimPrefix(target, "local://")
+		if target == "" || isRemote(target) {
 			continue
 		}
-		if target != "" {
+		// An entry still carrying a `$` did not resolve -- a command
+		// substitution, or a reference to something set at build time. It names
+		// no file we can identify, so it is not one.
+		if strings.Contains(target, "$") {
+			continue
+		}
+		if strings.ContainsAny(target, `/\`) || target == "." || target == ".." {
+			continue
+		}
+		if !seen[target] {
+			seen[target] = true
 			out = append(out, target)
 		}
 	}
 	return out
+}
+
+// sourceEntries returns source= plus every architecture-specific source_<arch>=
+// declaration. Eight of the 36 PKGBUILDs sampled while writing this package put
+// their real sources in source_x86_64 and leave source= empty or absent.
+func (v *Vars) sourceEntries() []string {
+	entries := append([]string(nil), v.Slice("source")...)
+
+	archKeys := make([]string, 0, len(v.arrays))
+	for name := range v.arrays {
+		if strings.HasPrefix(name, "source_") {
+			archKeys = append(archKeys, name)
+		}
+	}
+	sort.Strings(archKeys) // map iteration order is not deterministic
+	for _, k := range archKeys {
+		entries = append(entries, v.arrays[k]...)
+	}
+	return entries
 }
 
 func isRemote(s string) bool {
@@ -143,7 +216,12 @@ func (v *Vars) Install() string { return v.scalars["install"] }
 // Maintainer returns the `# Maintainer:` comment value, or "Unknown".
 // This is a packaging convention expressed in a comment, not shell syntax, so it
 // is read from the source text rather than the syntax tree.
-func (v *Vars) Maintainer() string { return v.maintainer }
+func (v *Vars) Maintainer() string {
+	if v.maintainer == "" {
+		return "Unknown"
+	}
+	return v.maintainer
+}
 
 func findMaintainer(src string) string {
 	for _, line := range strings.Split(src, "\n") {
@@ -151,7 +229,9 @@ func findMaintainer(src string) string {
 		if !strings.HasPrefix(line, "#") {
 			continue
 		}
-		rest := strings.TrimSpace(strings.TrimPrefix(line, "#"))
+		// TrimLeft, not TrimPrefix: `# # Maintainer: ...` occurs in the wild
+		// (llama.cpp-vulkan), and stripping only one # loses the maintainer.
+		rest := strings.TrimSpace(strings.TrimLeft(line, "# \t"))
 		if len(rest) < len("Maintainer:") {
 			continue
 		}
@@ -187,10 +267,11 @@ func (v *Vars) part(part syntax.WordPart) string {
 		}
 		return sb.String()
 	case *syntax.ParamExp:
-		// Plain ${foo} / $foo referring to something already declared. Anything
-		// with an operator (${foo%bar}, ${foo[1]}) is left as source: resolving
-		// it would mean implementing shell expansion semantics.
-		if p.Param != nil && p.Exp == nil && p.Index == nil && !p.Length && !p.Excl {
+		// Only a plain $foo / ${foo} is resolved. Anything carrying an operator
+		// (${foo/a/b}, ${foo:0:1}, ${foo%bar}) is left as source text, because
+		// returning the *unmodified* value would be a plausible wrong answer --
+		// the same failure class this package exists to remove.
+		if isSimpleParam(p) {
 			if val, ok := v.scalars[p.Param.Value]; ok {
 				return val
 			}
@@ -202,6 +283,30 @@ func (v *Vars) part(part syntax.WordPart) string {
 		// rather than seeing a silently empty string.
 		return raw(part)
 	}
+}
+
+// isSimpleParam reports whether a parameter expansion is a bare $name/${name}
+// with no operator attached. It mirrors the unexported (*syntax.ParamExp).simple
+// in mvdan.cc/sh; every field that type checks must be checked here, so if the
+// library gains an operator field this predicate needs the same addition.
+func isSimpleParam(p *syntax.ParamExp) bool {
+	return p.Param != nil && p.Flags == nil &&
+		!p.Excl && !p.Length && !p.Width && !p.IsSet &&
+		p.NestedParam == nil && p.Index == nil &&
+		len(p.Modifiers) == 0 && p.Slice == nil &&
+		p.Repl == nil && p.Names == 0 && p.Exp == nil
+}
+
+// unquoted reports whether a word contains no quoted section, and so is subject
+// to word splitting when it expands.
+func unquoted(w *syntax.Word) bool {
+	for _, part := range w.Parts {
+		switch part.(type) {
+		case *syntax.SglQuoted, *syntax.DblQuoted:
+			return false
+		}
+	}
+	return true
 }
 
 func raw(node syntax.Node) string {

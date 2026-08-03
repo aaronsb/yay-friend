@@ -66,12 +66,18 @@ func (y *YayClient) GetPackageInfo(ctx context.Context, packageName string) (*ty
 
 	// A PKGBUILD that will not parse is not fatal here -- the raw source still
 	// reaches the analyzer, which is the part that matters for a security review.
-	if vars, perr := pkgbuild.Parse(src); perr == nil {
-		info.Version = vars.Str("pkgver")
-		info.Description = vars.Str("pkgdesc")
-		info.URL = vars.Str("url")
-		info.Maintainer = vars.Maintainer()
+	// It is worth saying out loud though: this path ends in an install, and a
+	// PKGBUILD that will not parse as shell is itself a reason to look closer.
+	vars, perr := pkgbuild.Parse(src)
+	if perr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: %s has a PKGBUILD that does not parse as shell (%v); metadata unavailable, analyzing raw source\n", packageName, perr)
+		return info, nil
 	}
+
+	info.Version = vars.Str("pkgver")
+	info.Description = vars.Str("pkgdesc")
+	info.URL = vars.Str("url")
+	info.Maintainer = vars.Maintainer()
 
 	return info, nil
 }

@@ -309,7 +309,7 @@ func runAnalyzeLocal(ctx context.Context, path string) error {
 	fmt.Printf("Note: Local PKGBUILD analysis is not cached\n")
 
 	// Parse basic package info from PKGBUILD
-	pkgInfo := parseLocalPKGBUILD(string(pkgbuildContent), pkgbuildPath)
+	pkgInfo, vars := parseLocalPKGBUILD(string(pkgbuildContent), pkgbuildPath)
 
 	// Try to read additional files from the same directory
 	dir := filepath.Dir(pkgbuildPath)
@@ -318,7 +318,7 @@ func runAnalyzeLocal(ctx context.Context, path string) error {
 	// Companion files are only discoverable when the PKGBUILD parses; an
 	// unparseable one still gets analyzed on its own source above.
 	var installScriptPath string
-	if vars, perr := pkgbuild.Parse(string(pkgbuildContent)); perr == nil {
+	if vars != nil {
 		// Look for .install script
 		installScriptPath = findInstallScript(vars, dir)
 		if installScriptPath != "" {
@@ -374,7 +374,10 @@ func runAnalyzeLocal(ctx context.Context, path string) error {
 // A PKGBUILD that will not parse still yields a usable PackageInfo: the raw
 // source is what the analyzer reads, and metadata is only there to orient the
 // user.
-func parseLocalPKGBUILD(content string, path string) types.PackageInfo {
+// It returns the parsed variables alongside the info so companion-file discovery
+// does not have to parse the same source a second time; vars is nil when the
+// PKGBUILD could not be parsed.
+func parseLocalPKGBUILD(content string, path string) (types.PackageInfo, *pkgbuild.Vars) {
 	info := types.PackageInfo{
 		PKGBUILD:   content,
 		Maintainer: "Unknown",
@@ -387,7 +390,7 @@ func parseLocalPKGBUILD(content string, path string) types.PackageInfo {
 	vars, err := pkgbuild.Parse(content)
 	if err != nil {
 		fmt.Printf("Warning: could not parse %s as shell (%v); analyzing raw source\n", path, err)
-		return info
+		return info, nil
 	}
 
 	info.Name = vars.Name()
@@ -399,7 +402,7 @@ func parseLocalPKGBUILD(content string, path string) types.PackageInfo {
 	info.MakeDepends = vars.Slice("makedepends")
 	info.OptDepends = vars.Slice("optdepends")
 
-	return info
+	return info, vars
 }
 
 // findInstallScript returns the path to the .install script referenced by the

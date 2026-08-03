@@ -139,12 +139,218 @@ build() {
 	}
 }
 
+// TestAppendAssignment guards a regression caught in review: `+=` extends a
+// declaration in bash, and treating it as a plain assignment silently dropped
+// everything declared before it. The source= case is the one that bites -- a
+// dropped entry means a companion file never reaches the analyzer.
+func TestAppendAssignment(t *testing.T) {
+	const src = `depends=('a' 'b')
+depends+=('c')
+source=('x.patch')
+source+=('y.patch')
+pkgdesc='hello'
+pkgdesc+=' world'
+`
+	v, err := Parse(src)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got, want := v.Slice("depends"), []string{"a", "b", "c"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("depends = %v, want %v", got, want)
+	}
+	if got, want := v.Slice("source"), []string{"x.patch", "y.patch"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("source = %v, want %v", got, want)
+	}
+	if got, want := v.LocalSources(), []string{"x.patch", "y.patch"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("LocalSources() = %v, want %v", got, want)
+	}
+	if got, want := v.Str("pkgdesc"), "hello world"; got != want {
+		t.Errorf("pkgdesc = %q, want %q", got, want)
+	}
+}
+
+// TestInstall covers the input to the decision of whether a package's .install
+// script -- the part that runs as root -- gets collected for analysis.
+func TestInstall(t *testing.T) {
+	for _, tc := range []struct{ name, src, want string }{
+		{"literal", "install=hello.install\n", "hello.install"},
+		{"expanded", "pkgname=hello\ninstall=$pkgname.install\n", "hello.install"},
+		{"braced and quoted", "pkgname=hello\ninstall=\"${pkgname}.install\"\n", "hello.install"},
+		{"absent", "pkgname=hello\n", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v, err := Parse(tc.src)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if got := v.Install(); got != tc.want {
+				t.Errorf("Install() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestLocalSourcesRejectsPaths: makepkg requires a local source to sit beside
+// the PKGBUILD, so a path component means the entry is malformed. Honouring one
+// would let a hostile PKGBUILD name a file outside the package directory and
+// have its contents collected and sent to the analysis provider.
+func TestLocalSourcesRejectsPaths(t *testing.T) {
+	const src = `source=('good.patch'
+        '../../../etc/passwd'
+        '/etc/shadow'
+        'sub/dir/file.sh'
+        'https://example.com/real.tar.gz'
+        'renamed.tar.gz::https://example.com/x.tar.gz'
+        'name::git+https://example.com/r.git#commit=abc')
+`
+	v, err := Parse(src)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	want := []string{"good.patch"}
+	if got := v.LocalSources(); !reflect.DeepEqual(got, want) {
+		t.Errorf("LocalSources() = %v, want %v", got, want)
+	}
+}
+
+// TestUnresolvedSourceEntriesDropped: marktext-bin builds its source array from
+// a command substitution, `source=($(_source))`. That names no file we can
+// identify, so it must not be offered as one.
+func TestUnresolvedSourceEntriesDropped(t *testing.T) {
+	v, err := Parse("source=($(_source))\nsource+=('real.patch')\n")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got, want := v.LocalSources(), []string{"real.patch"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("LocalSources() = %v, want %v", got, want)
+	}
+}
+
+// TestLocalSchemePrefix covers `local://foo.patch`, which names a file beside
+// the PKGBUILD. simavr uses it; without stripping, the `//` made it look like a
+// path component and the patch was never collected.
+func TestLocalSchemePrefix(t *testing.T) {
+	v, err := Parse("source=(\"pkg::git+https://x/y.git#commit=a\"\n\t\"local://make_fix.patch\")\n")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got, want := v.LocalSources(), []string{"make_fix.patch"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("LocalSources() = %v, want %v", got, want)
+	}
+}
+
+// TestArchSpecificSources: many binary packages leave source= empty and declare
+// everything in source_x86_64=.
+func TestArchSpecificSources(t *testing.T) {
+	const src = `source=('common.patch')
+source_x86_64=('amd64.bin' 'https://example.com/a.tar.gz')
+source_aarch64=('arm64.bin')
+`
+	v, err := Parse(src)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	want := []string{"common.patch", "arm64.bin", "amd64.bin"} // arch keys sorted
+	if got := v.LocalSources(); !reflect.DeepEqual(got, want) {
+		t.Errorf("LocalSources() = %v, want %v", got, want)
+	}
+}
+
+// TestOperatorExpansionsNotResolved guards against returning a plausible wrong
+// value. `${v//-/.}` must not come back as the unmodified `v`: that is the exact
+// failure class -- silently wrong rather than visibly unknown -- that this
+// package exists to remove.
+func TestOperatorExpansionsNotResolved(t *testing.T) {
+	const src = `_ver=1.2.3-beta-4
+dotted=${_ver//-/.}
+initial=${_ver:0:1}
+trimmed=${_ver%%-*}
+fallback=${undefined:-fallbackvalue}
+plain=$_ver
+braced=${_ver}
+`
+	v, err := Parse(src)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	// Plain references resolve.
+	if got, want := v.Str("plain"), "1.2.3-beta-4"; got != want {
+		t.Errorf("plain = %q, want %q", got, want)
+	}
+	if got, want := v.Str("braced"), "1.2.3-beta-4"; got != want {
+		t.Errorf("braced = %q, want %q", got, want)
+	}
+	// Operator forms must NOT come back as the unmodified value.
+	for _, name := range []string{"dotted", "initial", "trimmed", "fallback"} {
+		if got := v.Str(name); got == "1.2.3-beta-4" {
+			t.Errorf("%s = %q -- operator expansion resolved to the unmodified value", name, got)
+		}
+	}
+}
+
+// TestUnquotedExpansionWordSplits: bash splits an unquoted expansion, quoted
+// text stays one entry.
+func TestUnquotedExpansionWordSplits(t *testing.T) {
+	const src = `_deps='glibc gtk3 zlib'
+depends=($_deps)
+optdepends=("$_deps")
+`
+	v, err := Parse(src)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got, want := v.Slice("depends"), []string{"glibc", "gtk3", "zlib"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("depends = %v, want %v (unquoted expansion word-splits)", got, want)
+	}
+	if got, want := v.Slice("optdepends"), []string{"glibc gtk3 zlib"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("optdepends = %v, want %v (quoted expansion does not split)", got, want)
+	}
+}
+
+// TestLaterDeclarationWins: a scalar followed by an array declaration of the
+// same name must not leave the stale scalar visible to Name().
+func TestLaterDeclarationWins(t *testing.T) {
+	v, err := Parse("pkgname=single\npkgname=('first' 'second')\n")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got, want := v.Name(), "first"; got != want {
+		t.Errorf("Name() = %q, want %q (stale scalar shadowed the array)", got, want)
+	}
+	if got, want := v.Str("pkgname"), ""; got != want {
+		t.Errorf("Str(pkgname) = %q, want %q", got, want)
+	}
+}
+
+// TestScalarFormArray covers `depends=glibc` without parentheses, which makepkg
+// reads as a one-element list.
+func TestScalarFormArray(t *testing.T) {
+	v, err := Parse("depends=glibc\n")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got, want := v.Slice("depends"), []string{"glibc"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("depends = %v, want %v", got, want)
+	}
+}
+
+// TestZeroValueMaintainer: Maintainer documents a "Unknown" fallback, so the
+// zero value must honour it rather than returning "".
+func TestZeroValueMaintainer(t *testing.T) {
+	var v Vars
+	if got := v.Maintainer(); got != "Unknown" {
+		t.Errorf("(zero Vars).Maintainer() = %q, want %q", got, "Unknown")
+	}
+}
+
 func TestMaintainer(t *testing.T) {
 	for _, tc := range []struct{ name, src, want string }{
 		{"standard", "# Maintainer: Jane Doe <jane@example.com>\npkgname=x\n", "Jane Doe <jane@example.com>"},
 		{"lowercase", "# maintainer: Jane Doe\npkgname=x\n", "Jane Doe"},
 		{"no space after hash", "#Maintainer: Jane Doe\npkgname=x\n", "Jane Doe"},
 		{"contributor first", "# Contributor: Bob\n# Maintainer: Jane\npkgname=x\n", "Jane"},
+		// Real shape from llama.cpp-vulkan; stripping only one # loses it.
+		{"double hash", "# # Maintainer: Orion-zhen <https://github.com/Orion-zhen>\npkgname=x\n", "Orion-zhen <https://github.com/Orion-zhen>"},
 		{"absent", "pkgname=x\n", "Unknown"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
