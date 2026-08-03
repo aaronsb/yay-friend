@@ -20,6 +20,8 @@ func RunYayStyleCommand(ctx context.Context, args []string) error {
 			skipAnalysis = true
 		case arg == "--no-spinner":
 			noSpinner = true
+		case arg == "--no-color":
+			noColor = true
 		case arg == "-v" || arg == "--verbose":
 			verbose = true
 		case arg == "--provider":
