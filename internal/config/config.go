@@ -243,14 +243,6 @@ func InitializeConfig() error {
 		return err
 	}
 
-	// Create subdirectories for provider configs, cache, etc.
-	if err := os.MkdirAll(filepath.Join(configDir, "providers"), 0755); err != nil {
-		return fmt.Errorf("failed to create providers directory: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Join(configDir, "cache"), 0755); err != nil {
-		return fmt.Errorf("failed to create cache directory: %w", err)
-	}
-
 	fmt.Printf("Created yay-friend configuration directory at %s\n", configDir)
 	fmt.Printf("Main configuration file: %s\n", configPath)
 	fmt.Println("You can edit the config.yaml file to customize your settings.")

@@ -25,7 +25,6 @@ ${XDG_DATA_HOME:-$HOME/.local/share}/yay-friend/
 │   │   └── metadata.json          # Package-level metadata (optional)
 │   └── {another-package}/
 │       └── {commit-hash}.json
-└── reports/                       # Malicious package reports (simplified)
 ```
 
 **Simplified - No evaluations/ directory needed!**
@@ -211,9 +210,9 @@ Each `{commit-hash}.json` contains:
    - Remove `evaluations/` directory functionality
    - Remove evaluation logging from analysis flow
 
-2. **Simplify reporter system**:
-   - Keep only local report saving (remove complex evaluation tracking)
-   - Reports are separate from analysis caching
+2. ~~**Simplify reporter system**~~ — superseded: `internal/reporter` was never
+   wired into any code path and has since been deleted outright rather than
+   simplified.
 
 3. **Clean implementation**:
    - Cache becomes the primary storage mechanism
@@ -234,7 +233,7 @@ Each `{commit-hash}.json` contains:
 ### Breaking Changes (No Backwards Compatibility)
 - [ ] **Remove `internal/logger/` entirely**
 - [ ] **Remove all evaluation logging from analysis flow**
-- [ ] **Simplify reporter to only handle malicious package reports**
+- [x] ~~Simplify reporter to only handle malicious package reports~~ — reporter deleted instead
 - [ ] **Clean up unused imports and dependencies**
 
 ### Core Implementation

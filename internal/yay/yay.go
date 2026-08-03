@@ -130,43 +130,6 @@ func (y *YayClient) SearchPackages(ctx context.Context, query string) ([]Package
 	return results, nil
 }
 
-// InteractiveSearch performs interactive package selection like yay
-func (y *YayClient) InteractiveSearch(ctx context.Context, query string) ([]string, error) {
-	// Let yay handle the interactive search and capture the selection
-	fmt.Printf("🔍 Searching for packages matching '%s'...\n", query)
-	
-	// Run yay in interactive mode and let it handle selection
-	cmd := exec.CommandContext(ctx, y.yayPath, query)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	
-	// This will return after user makes selection or cancels
-	err := cmd.Run()
-	if err != nil {
-		// User likely cancelled (Ctrl+C)
-		return nil, fmt.Errorf("search cancelled or failed: %w", err)
-	}
-	
-	// If we get here, yay would have proceeded with installation
-	// But we've intercepted it, so we need to parse what was selected
-	// This is tricky - we'd need to capture yay's selection somehow
-	
-	// For now, return empty to indicate we need a different approach
-	return nil, fmt.Errorf("interactive search completed, but package selection capture not implemented")
-}
-
-// CheckDependencies checks if packages exist and can be installed
-func (y *YayClient) CheckDependencies(ctx context.Context, packages []string) error {
-	for _, pkg := range packages {
-		cmd := exec.CommandContext(ctx, y.yayPath, "-Si", pkg)
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("package %s not found or not available: %w", pkg, err)
-		}
-	}
-	return nil
-}
-
 // ParseYayCommand parses a yay command into a YayOperation
 func ParseYayCommand(args []string) (*types.YayOperation, error) {
 	if len(args) == 0 {
