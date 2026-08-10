@@ -107,6 +107,7 @@ type PackageInfo struct {
 	// Additional files for analysis
 	InstallScript   string            `json:"install_script,omitempty"`
 	AdditionalFiles map[string]string `json:"additional_files,omitempty"` // filename -> content
+	PKGBUILDPath    string            `json:"pkgbuild_path,omitempty"`    // where the PKGBUILD was read from, when local
 }
 
 // AIProvider interface for different AI backends

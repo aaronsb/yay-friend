@@ -135,7 +135,47 @@ yay-friend config show
 yay-friend --skip-analysis -S package-name
 ```
 
-### Grading a Tree for pacrat
+### Machine-Readable Output
+
+Two shapes, for two different callers. With either, stdout carries exactly one
+JSON object and everything yay-friend narrates moves to stderr, so you can pipe
+the output and still watch the run.
+
+```bash
+# yay-friend's own shape: the whole analysis
+yay-friend analyze hello --json
+yay-friend analyze --file ./my-package --json
+
+# pacrat's shape: a grading of a staged tree
+PACRAT_PACKAGE=hello PACRAT_TREE=/path/to/tree PACRAT_COMMIT=51cec63… yay-friend grade
+```
+
+#### `analyze --json`
+
+The full analysis, plus the context it was produced in. Deliberately richer than
+any grading contract: it keeps the educational summary, the security lessons,
+the predictability score, the per-finding suggestions and entropy notes, and the
+AUR community numbers, because a caller shaping its own pipeline should not have
+to run the analysis twice to see what the analyzer actually said.
+
+```jsonc
+{
+  "yay_friend_version": "1.0.0",
+  "source": "aur",              // or "local", for --file
+  "cached": true,               // replayed from the analysis cache
+  "package": { "name": "hello", "version": "2.12.1", "commit_hash": "51cec63…",
+               "maintainer": "…", "votes": 12, "popularity": 0.31,
+               "files": ["hello.install"] },   // companion files that were read
+  "entropy": { "value": 1, "name": "LOW", "min": 0, "max": 4 },
+  "analysis": { /* the complete SecurityAnalysis, as the cache stores it */ }
+}
+```
+
+`entropy` is redundant with `analysis.overall_entropy` on purpose: the analysis
+stores the level as its integer, and a one-line `jq` filter usually wants the
+name and the bounds without having to know the enum.
+
+#### `grade`
 
 [pacrat](https://github.com/aaronsb/pacrat) gates AUR updates on a grade from
 any program that speaks `pacrat-grade/v1`. `yay-friend grade` speaks it natively,
@@ -172,9 +212,6 @@ commit), so a second ask about the same tree replays instead of calling a model.
   "meta": { "cached": true, "provider": "claude", "note": "Clean package.",
             "recommendation": "PROCEED", "yay_friend_version": "1.0.0" } }
 ```
-
-stdout carries exactly one JSON object and everything yay-friend narrates moves
-to stderr, so you can pipe the grading and still watch the run.
 
 `grade` is entropy, on 0-4, and only that. PROCEED / WARN / BLOCK is pacrat's to
 derive with the host's own thresholds; yay-friend's own recommendation rides
