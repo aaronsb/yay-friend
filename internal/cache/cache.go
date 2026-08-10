@@ -76,7 +76,7 @@ func (c *CacheManager) GetCachedAnalysis(packageName, commitHash string) (*types
 
 	// Check if cache file exists
 	if _, err := os.Stat(cacheFile); os.IsNotExist(err) {
-		return nil, fmt.Errorf("cache miss: no cached analysis found for %s@%s", packageName, commitHash[:8])
+		return nil, fmt.Errorf("cache miss: no cached analysis found for %s@%s", packageName, ShortHash(commitHash))
 	}
 
 	// Read and parse cached analysis
@@ -261,6 +261,17 @@ func (c *CacheManager) GetPackageVersions(packageName string) ([]string, error) 
 	sort.Strings(versions)
 
 	return versions, nil
+}
+
+// ShortHash abbreviates a commit hash for display. It does not assume a full
+// 40-character object id: a hash can arrive already abbreviated (pacrat's
+// grading contract accepts seven characters and up), and a fixed [:8] slice
+// panics on one.
+func ShortHash(commitHash string) string {
+	if len(commitHash) <= 8 {
+		return commitHash
+	}
+	return commitHash[:8]
 }
 
 // getCacheFilePath returns the full path for a cache file

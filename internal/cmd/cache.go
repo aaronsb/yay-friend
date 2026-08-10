@@ -195,12 +195,12 @@ func runCacheShow(ctx context.Context, packageName string) error {
 	for _, commitHash := range versions {
 		analysis, err := cacheManager.GetCachedAnalysis(packageName, commitHash)
 		if err != nil {
-			ui.Bullet("%s (error reading cache)", commitHash[:8])
+			ui.Bullet("%s (error reading cache)", cache.ShortHash(commitHash))
 			continue
 		}
 
 		ui.Blank()
-		fmt.Printf("  %s  %s\n", ui.Mark(analysis.OverallLevel), commitHash[:8])
+		fmt.Printf("  %s  %s\n", ui.Mark(analysis.OverallLevel), cache.ShortHash(commitHash))
 		ui.Field("provider", analysis.Provider)
 		ui.Field("analyzed", humanize.Time(analysis.AnalyzedAt))
 		if analysis.Summary != "" {
