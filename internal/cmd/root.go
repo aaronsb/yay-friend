@@ -10,7 +10,6 @@ import (
 	"github.com/aaronsb/yay-friend/internal/aur"
 	"github.com/aaronsb/yay-friend/internal/cache"
 	"github.com/aaronsb/yay-friend/internal/config"
-	"github.com/aaronsb/yay-friend/internal/providers"
 	"github.com/aaronsb/yay-friend/internal/types"
 	"github.com/aaronsb/yay-friend/internal/ui"
 	"github.com/aaronsb/yay-friend/internal/yay"
@@ -74,6 +73,7 @@ func init() {
 
 	// Add subcommands
 	rootCmd.AddCommand(newAnalyzeCmd())
+	rootCmd.AddCommand(newGradeCmd())
 	rootCmd.AddCommand(newCacheCmd())
 	rootCmd.AddCommand(newConfigCmd())
 	rootCmd.AddCommand(newProviderCmd())
@@ -176,32 +176,9 @@ func runInstall(ctx context.Context, args []string) error {
 	// Update operation with final package list
 	operation.Packages = finalPackages
 
-	// Initialize providers
-	registry := providers.NewProviderRegistry()
-	claudeProvider := providers.NewClaudeProvider()
-	claudeProvider.SetConfig(cfg)
-	registry.Register("claude", claudeProvider)
-	registry.Register("qwen", providers.NewQwenProvider())
-	registry.Register("copilot", providers.NewCopilotProvider())
-	registry.Register("goose", providers.NewGooseProvider())
-
-	// Determine which provider to use
-	providerName := provider
-	if providerName == "" {
-		providerName = cfg.DefaultProvider
-	}
-	if providerName == "" {
-		providerName = "claude" // Default fallback
-	}
-
-	aiProvider, err := registry.Get(providerName)
+	aiProvider, err := resolveProvider(ctx, cfg)
 	if err != nil {
-		return fmt.Errorf("provider error: %w", err)
-	}
-
-	// Authenticate provider
-	if err := aiProvider.Authenticate(ctx); err != nil {
-		return fmt.Errorf("authentication failed for %s: %w", providerName, err)
+		return err
 	}
 
 	// Analyze packages
@@ -278,10 +255,10 @@ func analyzeAndDecide(ctx context.Context, yayClient *yay.YayClient, provider ty
 	if cfg.Cache.Enabled && cacheManager != nil && pkgInfo.CommitHash != "" {
 		cachedAnalysis, cacheErr := cacheManager.GetCachedAnalysis(pkgInfo.Name, pkgInfo.CommitHash)
 		if cacheErr == nil {
-			ui.Say("using cached analysis (commit %s)", pkgInfo.CommitHash[:8])
+			ui.Say("using cached analysis (commit %s)", cache.ShortHash(pkgInfo.CommitHash))
 			analysis = cachedAnalysis
 		} else {
-			ui.Say("running fresh analysis (commit %s)", pkgInfo.CommitHash[:8])
+			ui.Say("running fresh analysis (commit %s)", cache.ShortHash(pkgInfo.CommitHash))
 			// Cache miss - continue to run AI analysis
 		}
 	}
@@ -292,13 +269,7 @@ func analyzeAndDecide(ctx context.Context, yayClient *yay.YayClient, provider ty
 		ui.RenderCollected(pkgInfo)
 
 		// Analyze security with enriched context
-		// Check if provider supports options (for Claude)
-		if claudeProvider, ok := provider.(*providers.ClaudeProvider); ok {
-			analysis, err = claudeProvider.AnalyzePKGBUILDWithOptions(ctx, *pkgInfo, noSpinner)
-		} else {
-			analysis, err = provider.AnalyzePKGBUILD(ctx, *pkgInfo)
-		}
-
+		analysis, err = analyzeWith(ctx, provider, *pkgInfo, false)
 		if err != nil {
 			return err
 		}
