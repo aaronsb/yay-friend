@@ -135,6 +135,56 @@ yay-friend config show
 yay-friend --skip-analysis -S package-name
 ```
 
+### Grading a Tree for pacrat
+
+[pacrat](https://github.com/aaronsb/pacrat) gates AUR updates on a grade from
+any program that speaks `pacrat-grade/v1`. `yay-friend grade` speaks it natively,
+so registering it is one line:
+
+```toml
+[[graders]]
+name = "yay-friend"
+cmd = "yay-friend grade"
+timeout_s = 600
+scale = { min = 0, max = 4 }
+```
+
+The subject arrives in the environment — `PACRAT_PACKAGE`, `PACRAT_TREE`,
+`PACRAT_COMMIT` — and `--package/--tree/--commit` override it, so you can drive
+the same command by hand:
+
+```bash
+PACRAT_PACKAGE=hello PACRAT_TREE=/path/to/tree PACRAT_COMMIT=51cec63… yay-friend grade
+```
+
+What gets read is the tree you were handed: the PKGBUILD pacrat staged, its
+`.install` hook and any file shipped beside it, not a fresh fetch of whatever
+the AUR is serving now. The result is filed in the usual cache under (package,
+commit), so a second ask about the same tree replays instead of calling a model.
+
+```json
+{ "contract": "pacrat-grade/v1",
+  "grader": "yay-friend",
+  "subject": { "package": "hello", "commit": "51cec63…", "version": "2.12.1-1" },
+  "grade": 1,
+  "scale": { "min": 0, "max": 4 },
+  "findings": [ { "level": 2, "title": "source_analysis: …", "span": "PKGBUILD:12" } ],
+  "meta": { "cached": true, "provider": "claude", "note": "Clean package.",
+            "recommendation": "PROCEED", "yay_friend_version": "1.0.0" } }
+```
+
+stdout carries exactly one JSON object and everything yay-friend narrates moves
+to stderr, so you can pipe the grading and still watch the run.
+
+`grade` is entropy, on 0-4, and only that. PROCEED / WARN / BLOCK is pacrat's to
+derive with the host's own thresholds; yay-friend's own recommendation rides
+along in `meta`, where it is advisory and cannot move a verdict.
+
+Any failure — no provider configured, the model unreachable, an unreadable tree,
+an entropy that will not fit the scale — is a nonzero exit with the reason on
+stderr and **no JSON at all**. pacrat reads that as UNGRADED, which holds; a
+half-report is worse than none.
+
 ### Cache Management
 `yay-friend` intelligently caches analysis results using AUR git commit hashes to avoid redundant AI calls for unchanged packages.
 
@@ -276,6 +326,10 @@ wear it, so you can always tell which lines came from the analyzer.
 - **Entropy Analysis Engine**: Multi-factor security assessment
 - **Provider Interface**: Modular AI backend system
 - **Configuration Management**: User preferences and thresholds
+- **Grading Contract** (`internal/grade`): translation of an analysis into
+  `pacrat-grade/v1`, and the whole of yay-friend's side of that boundary — the
+  contract is a JSON shape, so speaking it is a marshalling concern and stays
+  well away from the analyzer
 
 ## Directory Structure
 

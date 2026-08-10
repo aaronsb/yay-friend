@@ -73,6 +73,7 @@ func init() {
 
 	// Add subcommands
 	rootCmd.AddCommand(newAnalyzeCmd())
+	rootCmd.AddCommand(newGradeCmd())
 	rootCmd.AddCommand(newCacheCmd())
 	rootCmd.AddCommand(newConfigCmd())
 	rootCmd.AddCommand(newProviderCmd())
