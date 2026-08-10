@@ -52,7 +52,7 @@ func helloSubject() Subject {
 }
 
 func TestFromAnalysisMatchesTheAdapterMapping(t *testing.T) {
-	report, err := FromAnalysis(helloSubject(), helloAnalysis(), true)
+	report, err := FromAnalysis(helloSubject(), helloAnalysis(), true, "")
 	if err != nil {
 		t.Fatalf("FromAnalysis: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestFromAnalysisRefusesEntropyOutsideTheScale(t *testing.T) {
 		analysis := helloAnalysis()
 		analysis.OverallEntropy = entropy
 
-		report, err := FromAnalysis(helloSubject(), analysis, false)
+		report, err := FromAnalysis(helloSubject(), analysis, false, "")
 		if err == nil {
 			t.Errorf("entropy %d: expected a refusal, got grade %d", entropy, report.Grade)
 		}
@@ -124,7 +124,7 @@ func TestFromAnalysisRefusesEntropyOutsideTheScale(t *testing.T) {
 }
 
 func TestFromAnalysisRefusesANilAnalysis(t *testing.T) {
-	if _, err := FromAnalysis(helloSubject(), nil, false); err == nil {
+	if _, err := FromAnalysis(helloSubject(), nil, false, ""); err == nil {
 		t.Error("expected a refusal for a nil analysis")
 	}
 }
@@ -137,7 +137,7 @@ func TestFromAnalysisClampsFindingLevels(t *testing.T) {
 	analysis.Findings[0].Entropy = 4000
 	analysis.Findings[1].Entropy = -7
 
-	report, err := FromAnalysis(helloSubject(), analysis, false)
+	report, err := FromAnalysis(helloSubject(), analysis, false, "")
 	if err != nil {
 		t.Fatalf("a wild finding level must not cost the grading: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestFromAnalysisFlattensAndStripsTitles(t *testing.T) {
 	analysis := helloAnalysis()
 	analysis.Findings[0].Description = "before\x1b[31m\x07mid\x7fafter"
 
-	report, err := FromAnalysis(helloSubject(), analysis, false)
+	report, err := FromAnalysis(helloSubject(), analysis, false, "")
 	if err != nil {
 		t.Fatalf("control characters should not fail the grading: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestFromAnalysisDescribesAFindingWithNoText(t *testing.T) {
 	analysis := helloAnalysis()
 	analysis.Findings = []types.SecurityFinding{{Entropy: types.EntropyHigh}}
 
-	report, err := FromAnalysis(helloSubject(), analysis, false)
+	report, err := FromAnalysis(helloSubject(), analysis, false, "")
 	if err != nil {
 		t.Fatalf("FromAnalysis: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestFromAnalysisCapsFindings(t *testing.T) {
 		})
 	}
 
-	report, err := FromAnalysis(helloSubject(), analysis, false)
+	report, err := FromAnalysis(helloSubject(), analysis, false, "")
 	if err != nil {
 		t.Fatalf("a long findings list should still grade: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestFromAnalysisTruncatesLongText(t *testing.T) {
 	analysis.Findings[0].Description = strings.Repeat("x", 500)
 	analysis.Summary = strings.Repeat("y", 500)
 
-	report, err := FromAnalysis(helloSubject(), analysis, false)
+	report, err := FromAnalysis(helloSubject(), analysis, false, "")
 	if err != nil {
 		t.Fatalf("FromAnalysis: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestReportWithNoFindingsMarshalsAnEmptyList(t *testing.T) {
 	analysis := helloAnalysis()
 	analysis.Findings = nil
 
-	report, err := FromAnalysis(helloSubject(), analysis, false)
+	report, err := FromAnalysis(helloSubject(), analysis, false, "")
 	if err != nil {
 		t.Fatalf("FromAnalysis: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestReportConformsToTheContract(t *testing.T) {
 	analysis := helloAnalysis()
 	analysis.OverallEntropy = types.EntropyCritical
 
-	report, err := FromAnalysis(helloSubject(), analysis, true)
+	report, err := FromAnalysis(helloSubject(), analysis, true, "")
 	if err != nil {
 		t.Fatalf("FromAnalysis: %v", err)
 	}

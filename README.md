@@ -175,6 +175,26 @@ to run the analysis twice to see what the analyzer actually said.
 stores the level as its integer, and a one-line `jq` filter usually wants the
 name and the bounds without having to know the enum.
 
+This is what makes yay-friend usable as a pacrat grader *without* the native
+`grade` subcommand — the shape a tool that has never heard of pacrat would
+pipe into place. The whole adapter is one filter:
+
+```toml
+[[graders]]
+name = "yay-friend-pipe"
+cmd = """yay-friend analyze --file "$PACRAT_TREE" --json | jq '{
+  contract: "pacrat-grade/v1", grader: "yay-friend-pipe",
+  subject: {package: env.PACRAT_PACKAGE, commit: env.PACRAT_COMMIT},
+  grade: .entropy.value, scale: {min: .entropy.min, max: .entropy.max},
+  findings: [], meta: {note: .analysis.summary}}'"""
+timeout_s = 600
+```
+
+Real, runnable, and deliberately the worse option — it drops the findings and
+re-analyzes without pacrat's commit-keyed replay — because its job is to show
+the *shape* of adapting an unknowing tool, next to the one-string registration
+below for a tool that speaks the contract itself.
+
 #### `grade`
 
 [pacrat](https://github.com/aaronsb/pacrat) gates AUR updates on a grade from

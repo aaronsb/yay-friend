@@ -29,6 +29,29 @@ func resolvePKGBUILDPath(path string) (string, error) {
 	return pkgbuildPath, nil
 }
 
+// readRegular reads a file after proving it is a regular file. The tree's
+// paths are chosen by whoever staged it, and os.ReadFile on a FIFO blocks in
+// open() forever — past SIGTERM, since main's signal context replaces
+// die-on-signal with a cancel no file read observes. Refusing anything
+// irregular keeps a hostile tree from hanging a grade that a caller then has
+// to SIGKILL.
+func readRegular(path string) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	// A symlink is followed one hop and its target held to the same rule.
+	if info.Mode()&os.ModeSymlink != 0 {
+		if info, err = os.Stat(path); err != nil {
+			return nil, err
+		}
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", path)
+	}
+	return os.ReadFile(path)
+}
+
 // collectPackageTree reads a PKGBUILD and every companion file it references —
 // the .install hook and any source= entry shipped beside it — so the analyzer
 // sees the code that actually runs, not just the recipe that fetches it.
@@ -36,7 +59,7 @@ func resolvePKGBUILDPath(path string) (string, error) {
 // It returns the path of the install script it found, if any, because that is
 // the one companion worth naming to the user: it is the part that runs as root.
 func collectPackageTree(pkgbuildPath string) (types.PackageInfo, string, error) {
-	content, err := os.ReadFile(pkgbuildPath)
+	content, err := readRegular(pkgbuildPath)
 	if err != nil {
 		return types.PackageInfo{}, "", fmt.Errorf("failed to read PKGBUILD: %w", err)
 	}
@@ -51,14 +74,14 @@ func collectPackageTree(pkgbuildPath string) (types.PackageInfo, string, error) 
 	if vars != nil {
 		installScriptPath = findInstallScript(vars, dir)
 		if installScriptPath != "" {
-			if content, err := os.ReadFile(installScriptPath); err == nil {
+			if content, err := readRegular(installScriptPath); err == nil {
 				pkgInfo.InstallScript = string(content)
 				pkgInfo.AdditionalFiles[filepath.Base(installScriptPath)] = string(content)
 			}
 		}
 
 		for _, file := range findAdditionalFiles(vars, dir) {
-			if content, err := os.ReadFile(filepath.Join(dir, file)); err == nil {
+			if content, err := readRegular(filepath.Join(dir, file)); err == nil {
 				pkgInfo.AdditionalFiles[file] = string(content)
 			}
 		}
@@ -139,7 +162,7 @@ func treeVersion(dir string) string {
 	if v := srcinfoVersion(filepath.Join(dir, ".SRCINFO")); v != "" {
 		return v
 	}
-	content, err := os.ReadFile(filepath.Join(dir, "PKGBUILD"))
+	content, err := readRegular(filepath.Join(dir, "PKGBUILD"))
 	if err != nil {
 		return ""
 	}

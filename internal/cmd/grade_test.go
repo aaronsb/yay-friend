@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -513,3 +515,35 @@ var errFakeProvider = errorString("provider unavailable")
 type errorString string
 
 func (e errorString) Error() string { return string(e) }
+
+// A FIFO named PKGBUILD used to hang grade in open() forever — past SIGTERM,
+// since main's signal context replaces die-on-signal with a cancel no file
+// read observes. readRegular refuses anything irregular before opening it.
+func TestAFIFONamedPKGBUILDIsRefusedNotHung(t *testing.T) {
+	_, tree, run := gradeHarness(t)
+	if err := os.Remove(filepath.Join(tree, "PKGBUILD")); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(filepath.Join(tree, "PKGBUILD"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	var stdout string
+	var err error
+	go func() {
+		stdout, _, err = run("--package", "hello", "--tree", tree, "--commit", testCommit)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("grade hung on a FIFO PKGBUILD")
+	}
+	if err == nil {
+		t.Fatal("a FIFO PKGBUILD graded successfully")
+	}
+	if stdout != "" {
+		t.Errorf("a failure wrote to stdout: %q", stdout)
+	}
+}

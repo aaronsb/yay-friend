@@ -102,10 +102,14 @@ func runGrade(ctx context.Context, flags subject, out io.Writer) error {
 
 	var analysis *types.SecurityAnalysis
 	cached := false
+	producedBy := ""
 	if cacheManager != nil {
-		if hit, cacheErr := cacheManager.GetCachedAnalysis(subj.pkg, key); cacheErr == nil {
+		if entry, cacheErr := cacheManager.GetCachedEntry(subj.pkg, key); cacheErr == nil {
 			ui.Say("replaying cached analysis for %s@%s", subj.pkg, cache.ShortHash(subj.commit))
-			analysis, cached = hit, true
+			analysis, cached = entry.Analysis, true
+			// The version that produced the analysis, not the one replaying
+			// it — the adapter reported the same thing under the same key.
+			producedBy = entry.CacheMetadata.YayFriendVersion
 		}
 	}
 
@@ -140,7 +144,7 @@ func runGrade(ctx context.Context, flags subject, out io.Writer) error {
 		Package: subj.pkg,
 		Commit:  subj.commit,
 		Version: treeVersion(subj.tree),
-	}, analysis, cached)
+	}, analysis, cached, producedBy)
 	if err != nil {
 		return err
 	}

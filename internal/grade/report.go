@@ -116,8 +116,12 @@ type Meta struct {
 //     from, so the adapter's per-file span was already always the PKGBUILD.
 //
 // cached says whether the analysis was replayed from yay-friend's own cache
-// rather than produced by a model on this run.
-func FromAnalysis(subj Subject, a *types.SecurityAnalysis, cached bool) (*Report, error) {
+// rather than produced by a model on this run. producedBy names the
+// yay-friend version that produced the analysis — the cache entry's on a
+// replay, empty for "this build" — because that is what the adapter reported
+// under the same key, and a version that silently changed referent would
+// disagree with it on every replayed hit.
+func FromAnalysis(subj Subject, a *types.SecurityAnalysis, cached bool, producedBy string) (*Report, error) {
 	if a == nil {
 		return nil, fmt.Errorf("no analysis to grade")
 	}
@@ -151,11 +155,16 @@ func FromAnalysis(subj Subject, a *types.SecurityAnalysis, cached bool) (*Report
 		Scale:    Scale{Min: ScaleMin, Max: ScaleMax},
 		Findings: out,
 		Meta: Meta{
-			Cached:           cached,
-			Provider:         oneline(a.Provider),
-			Note:             truncate(oneline(a.Summary), maxNote),
-			Recommendation:   oneline(a.Recommendation),
-			YayFriendVersion: oneline(version.Version),
+			Cached:         cached,
+			Provider:       oneline(a.Provider),
+			Note:           truncate(oneline(a.Summary), maxNote),
+			Recommendation: oneline(a.Recommendation),
+			YayFriendVersion: oneline(func() string {
+				if producedBy != "" {
+					return producedBy
+				}
+				return version.Version
+			}()),
 		},
 	}, nil
 }

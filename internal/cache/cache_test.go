@@ -2,6 +2,8 @@ package cache
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -295,5 +297,51 @@ func TestValidateCommitHash(t *testing.T) {
 		if result != test.valid {
 			t.Errorf("ValidateCommitHash(%q) = %v, expected %v", test.hash, result, test.valid)
 		}
+	}
+}
+// A copied or hand-edited entry declaring another package is a grading of
+// something else wearing the right filename; replaying it would launder that
+// analysis into an answer about this package. The adapter refuses this exact
+// input, and the native path must agree.
+func TestACachedEntryDeclaringAnotherPackageIsRefused(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "yay-friend-cache-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	cacheManager := &CacheManager{cacheDir: tmpDir}
+
+	commitHash := "1234567890abcdef1234567890abcdef12345678"
+	analysis := &types.SecurityAnalysis{
+		PackageName: "evil-other",
+		Summary:     "an analysis of a different package",
+		AnalyzedAt:  time.Now(),
+	}
+	// Filed under hello's name, declaring evil-other inside — the tampered
+	// shape, built through the real writer and then re-labelled by hand.
+	if err := cacheManager.SaveAnalysis("evil-other", commitHash, analysis); err != nil {
+		t.Fatal(err)
+	}
+	src := cacheManager.getCacheFilePath("evil-other", commitHash)
+	dst := cacheManager.getCacheFilePath("hello", commitHash)
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := cacheManager.GetCachedEntry("hello", commitHash); err == nil {
+		t.Fatal("a cache entry declaring another package was replayed")
+	} else if !strings.Contains(err.Error(), "evil-other") {
+		t.Errorf("the refusal does not name the declared package: %v", err)
+	}
+	// The un-tampered entry still replays under its own name.
+	if _, err := cacheManager.GetCachedEntry("evil-other", commitHash); err != nil {
+		t.Errorf("the honest entry stopped replaying: %v", err)
 	}
 }

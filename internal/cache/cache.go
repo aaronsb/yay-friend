@@ -72,6 +72,19 @@ func NewCacheManager() (*CacheManager, error) {
 
 // GetCachedAnalysis retrieves a cached analysis if it exists
 func (c *CacheManager) GetCachedAnalysis(packageName, commitHash string) (*types.SecurityAnalysis, error) {
+	cached, err := c.GetCachedEntry(packageName, commitHash)
+	if err != nil {
+		return nil, err
+	}
+	return cached.Analysis, nil
+}
+
+// GetCachedEntry retrieves a cached entry with its metadata, validating that
+// the entry is what its filename claims. Both identity fields are checked: a
+// copied or hand-edited entry declaring another package or commit is a
+// grading of something else wearing the right filename, and replaying it
+// would launder that analysis into an answer about this package.
+func (c *CacheManager) GetCachedEntry(packageName, commitHash string) (*CachedAnalysis, error) {
 	cacheFile := c.getCacheFilePath(packageName, commitHash)
 
 	// Check if cache file exists
@@ -94,8 +107,13 @@ func (c *CacheManager) GetCachedAnalysis(packageName, commitHash string) (*types
 	if cached.CacheMetadata.CommitHash != commitHash {
 		return nil, fmt.Errorf("cache corruption: commit hash mismatch")
 	}
+	// Validate the package too — same reasoning, same consequence
+	if cached.CacheMetadata.PackageName != packageName {
+		return nil, fmt.Errorf("cache corruption: entry declares package %q, not %q",
+			cached.CacheMetadata.PackageName, packageName)
+	}
 
-	return cached.Analysis, nil
+	return &cached, nil
 }
 
 // SaveAnalysis saves an analysis result to cache
