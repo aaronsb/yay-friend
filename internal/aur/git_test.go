@@ -36,16 +36,16 @@ func TestValidateCommitHash(t *testing.T) {
 		{"ffffffffffffffffffffffffffffffffffffffff", true},
 		{"FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF", true},
 		{"a1b2c3d4e5f6789012345678901234567890abcd", true},
-		
+
 		// Invalid commit hashes
-		{"", false},                                          // Empty
-		{"123", false},                                       // Too short
+		{"", false},    // Empty
+		{"123", false}, // Too short
 		{"1234567890abcdef1234567890abcdef1234567", false},   // 39 characters (too short)
 		{"1234567890abcdef1234567890abcdef123456789", false}, // 41 characters (too long)
 		{"1234567890abcdefg234567890abcdef12345678", false},  // Contains invalid character 'g'
 		{"1234567890abcdef 234567890abcdef12345678", false},  // Contains space
 		{"1234567890abcdef-234567890abcdef12345678", false},  // Contains hyphen
-		{"not-a-valid-commit-hash-at-all", false},           // Completely invalid
+		{"not-a-valid-commit-hash-at-all", false},            // Completely invalid
 		{"1234567890abcdef1234567890abcdef1234567z", false},  // Contains invalid character 'z'
 	}
 
@@ -63,16 +63,16 @@ func TestValidateCommitHash(t *testing.T) {
 func TestGetLatestCommitHash_NotImplemented(t *testing.T) {
 	// This test is intentionally skipped to avoid network calls in unit tests
 	t.Skip("GetLatestCommitHash requires network access and is not suitable for unit tests")
-	
+
 	// In a real test suite, we would mock the git command or use a test repository
 	// Example integration test (would require git and network):
-	// 
+	//
 	// ctx := context.Background()
 	// commitHash, err := GetLatestCommitHash(ctx, "yay")
 	// if err != nil {
 	//     t.Fatalf("Failed to get commit hash: %v", err)
 	// }
-	// 
+	//
 	// if !ValidateCommitHash(commitHash) {
 	//     t.Errorf("GetLatestCommitHash returned invalid commit hash: %s", commitHash)
 	// }

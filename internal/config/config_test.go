@@ -126,7 +126,7 @@ func TestSetRejectsBadInput(t *testing.T) {
 	cases := []struct {
 		name, key, value string
 	}{
-		{"unknown key", "claude.modle", "opus"},      // typo -> unknown field
+		{"unknown key", "claude.modle", "opus"}, // typo -> unknown field
 		{"float into int", "cache.max_age_days", "1.2"},
 		{"invalid provider", "default_provider", "bogus"},
 		{"type mismatch", "cache.enabled", "notabool"},

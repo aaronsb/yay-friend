@@ -9,11 +9,11 @@ import (
 type SecurityEntropy int
 
 const (
-	EntropyMinimal SecurityEntropy = iota  // Very predictable, low risk
-	EntropyLow                            // Some uncertainty, minor risk
-	EntropyModerate                       // Moderate uncertainty, concerning
-	EntropyHigh                           // High uncertainty, suspicious  
-	EntropyCritical                       // Maximum uncertainty, dangerous
+	EntropyMinimal  SecurityEntropy = iota // Very predictable, low risk
+	EntropyLow                             // Some uncertainty, minor risk
+	EntropyModerate                        // Moderate uncertainty, concerning
+	EntropyHigh                            // High uncertainty, suspicious
+	EntropyCritical                        // Maximum uncertainty, dangerous
 )
 
 func (s SecurityEntropy) String() string {
@@ -21,7 +21,7 @@ func (s SecurityEntropy) String() string {
 	case EntropyMinimal:
 		return "MINIMAL"
 	case EntropyLow:
-		return "LOW"  
+		return "LOW"
 	case EntropyModerate:
 		return "MODERATE"
 	case EntropyHigh:
@@ -34,6 +34,7 @@ func (s SecurityEntropy) String() string {
 
 // Legacy aliases for backward compatibility
 type SecurityLevel = SecurityEntropy
+
 const (
 	SecuritySafe     = EntropyMinimal
 	SecurityLow      = EntropyLow
@@ -60,8 +61,8 @@ func (s *SecurityLevel) UnmarshalYAML(unmarshal func(interface{}) error) error {
 // SecurityFinding represents a specific security issue found
 type SecurityFinding struct {
 	Type         string          `json:"type"`
-	Entropy      SecurityEntropy `json:"entropy"`      // How much uncertainty this adds
-	Severity     SecurityLevel   `json:"severity"`     // Legacy field for compatibility
+	Entropy      SecurityEntropy `json:"entropy"`  // How much uncertainty this adds
+	Severity     SecurityLevel   `json:"severity"` // Legacy field for compatibility
 	Description  string          `json:"description"`
 	LineNumber   int             `json:"line_number,omitempty"`
 	Context      string          `json:"context,omitempty"`
@@ -72,8 +73,8 @@ type SecurityFinding struct {
 // SecurityAnalysis represents the complete security analysis of a PKGBUILD
 type SecurityAnalysis struct {
 	PackageName         string            `json:"package_name"`
-	OverallEntropy      SecurityEntropy   `json:"overall_entropy"`    // Primary entropy assessment
-	OverallLevel        SecurityLevel     `json:"overall_level"`      // Legacy compatibility
+	OverallEntropy      SecurityEntropy   `json:"overall_entropy"` // Primary entropy assessment
+	OverallLevel        SecurityLevel     `json:"overall_level"`   // Legacy compatibility
 	Findings            []SecurityFinding `json:"findings"`
 	Summary             string            `json:"summary"`
 	Recommendation      string            `json:"recommendation"`
@@ -95,15 +96,15 @@ type PackageInfo struct {
 	PKGBUILD    string `json:"pkgbuild"`
 	CommitHash  string `json:"commit_hash"` // AUR git commit hash for caching
 	// AUR page context
-	AURPageURL       string   `json:"aur_page_url,omitempty"`
-	LastUpdated      string   `json:"last_updated,omitempty"`
-	FirstSubmitted   string   `json:"first_submitted,omitempty"`
-	Votes            int      `json:"votes,omitempty"`
-	Popularity       float64  `json:"popularity,omitempty"`
-	Comments         []string `json:"comments,omitempty"`
-	Dependencies     []string `json:"dependencies,omitempty"`
-	MakeDepends      []string `json:"make_depends,omitempty"`
-	OptDepends       []string `json:"opt_depends,omitempty"`
+	AURPageURL     string   `json:"aur_page_url,omitempty"`
+	LastUpdated    string   `json:"last_updated,omitempty"`
+	FirstSubmitted string   `json:"first_submitted,omitempty"`
+	Votes          int      `json:"votes,omitempty"`
+	Popularity     float64  `json:"popularity,omitempty"`
+	Comments       []string `json:"comments,omitempty"`
+	Dependencies   []string `json:"dependencies,omitempty"`
+	MakeDepends    []string `json:"make_depends,omitempty"`
+	OptDepends     []string `json:"opt_depends,omitempty"`
 	// Additional files for analysis
 	InstallScript   string            `json:"install_script,omitempty"`
 	AdditionalFiles map[string]string `json:"additional_files,omitempty"` // filename -> content
@@ -129,18 +130,18 @@ type ProviderCapabilities struct {
 
 // Config represents the application configuration
 type Config struct {
-	DefaultProvider string            `yaml:"default_provider"`
-	Providers       map[string]string `yaml:"providers"` // provider_name -> config_path
+	DefaultProvider    string            `yaml:"default_provider"`
+	Providers          map[string]string `yaml:"providers"` // provider_name -> config_path
 	SecurityThresholds struct {
-		BlockLevel    SecurityLevel `yaml:"block_level"`
-		WarnLevel     SecurityLevel `yaml:"warn_level"`
-		AutoProceed   bool          `yaml:"auto_proceed_safe"`
+		BlockLevel  SecurityLevel `yaml:"block_level"`
+		WarnLevel   SecurityLevel `yaml:"warn_level"`
+		AutoProceed bool          `yaml:"auto_proceed_safe"`
 	} `yaml:"security_thresholds"`
 	Cache struct {
-		Enabled      bool `yaml:"enabled"`
-		MaxAgeDays   int  `yaml:"max_age_days"`
-		MaxSizeMB    int  `yaml:"max_size_mb"`
-		Compress     bool `yaml:"compress"`
+		Enabled    bool `yaml:"enabled"`
+		MaxAgeDays int  `yaml:"max_age_days"`
+		MaxSizeMB  int  `yaml:"max_size_mb"`
+		Compress   bool `yaml:"compress"`
 	} `yaml:"cache"`
 	Prompts struct {
 		SecurityAnalysis string `yaml:"security_analysis"`

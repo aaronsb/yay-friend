@@ -4,7 +4,9 @@
 *.dll
 *.so
 *.dylib
-yay-friend
+# Anchored: unanchored `yay-friend` also matched the cmd/yay-friend/ directory,
+# so a new file added beside main.go was silently untracked.
+/yay-friend
 
 # Test binary
 *.test

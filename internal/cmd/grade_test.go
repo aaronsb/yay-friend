@@ -94,7 +94,7 @@ func writeTree(t *testing.T, dir string) string {
 		t.Fatal(err)
 	}
 	files := map[string]string{
-		"PKGBUILD":      testPKGBUILD,
+		"PKGBUILD": testPKGBUILD,
 		// arch is required for this to parse as a .SRCINFO at all; without it the
 		// version silently comes from the PKGBUILD fallback instead, and this
 		// fixture stops exercising the path it is here for.
