@@ -41,3 +41,5 @@ Thumbs.db
 config.local.*
 *.local.yaml
 *.local.json
+# make package dry run
+/pkgbuild-check/
