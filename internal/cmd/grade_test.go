@@ -95,7 +95,10 @@ func writeTree(t *testing.T, dir string) string {
 	}
 	files := map[string]string{
 		"PKGBUILD":      testPKGBUILD,
-		".SRCINFO":      "pkgbase = hello\n\tpkgver = 2.12.1\n\tpkgrel = 1\n\npkgname = hello\n",
+		// arch is required for this to parse as a .SRCINFO at all; without it the
+		// version silently comes from the PKGBUILD fallback instead, and this
+		// fixture stops exercising the path it is here for.
+		".SRCINFO":      "pkgbase = hello\n\tpkgver = 2.12.1\n\tpkgrel = 1\n\tarch = x86_64\n\npkgname = hello\n",
 		"hello.install": "post_install() {\n  echo hello\n}\n",
 		"hello.sh":      "#!/bin/sh\necho hello\n",
 	}

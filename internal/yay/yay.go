@@ -226,11 +226,24 @@ func ParseYayCommand(args []string) (*types.YayOperation, error) {
 		return operation, nil
 	} else {
 		// First arg is not a flag, assume it's just analysis (no install)
-		return &types.YayOperation{
+		operation := &types.YayOperation{
 			Command:   "", // No command means analyze-only
 			Operation: "analyze",
 			Flags:     []string{},
-			Packages:  args, // All args are packages
-		}, nil
+			Packages:  []string{},
+		}
+
+		// Flags are separated here for the same reason as above. Filing every
+		// argument as a package name meant `yay-friend pkg --needed` went looking
+		// for a package called "--needed", found none, and offered a search.
+		for _, arg := range args {
+			if strings.HasPrefix(arg, "-") {
+				operation.Flags = append(operation.Flags, arg)
+			} else {
+				operation.Packages = append(operation.Packages, arg)
+			}
+		}
+
+		return operation, nil
 	}
 }

@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"strings"
 )
 
 // RunYayStyleCommand handles yay-style commands directly without cobra.
@@ -11,30 +10,12 @@ import (
 // parsing), yay-friend's own flags mixed into the command line would otherwise
 // leak through to yay. We extract them here, set the corresponding globals, and
 // pass only the remaining arguments on to yay.
+//
+// The list of what counts as ours lives in args.go, shared with the cobra
+// registration, because keeping a second copy here is what let --noconfirm be a
+// flag on one path and a package name on the other.
 func RunYayStyleCommand(ctx context.Context, args []string) error {
-	passthrough := make([]string, 0, len(args))
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case arg == "--skip-analysis":
-			skipAnalysis = true
-		case arg == "--no-spinner":
-			noSpinner = true
-		case arg == "--no-color":
-			noColor = true
-		case arg == "-v" || arg == "--verbose":
-			verbose = true
-		case arg == "--provider":
-			if i+1 < len(args) {
-				provider = args[i+1]
-				i++ // consume the value
-			}
-		case strings.HasPrefix(arg, "--provider="):
-			provider = strings.TrimPrefix(arg, "--provider=")
-		default:
-			passthrough = append(passthrough, arg)
-		}
-	}
+	passthrough := consumeOwnFlags(args)
 
 	// cobra.OnInitialize does not fire on this path, so the setup it normally
 	// performs has to happen explicitly. Without this, --no-color and the

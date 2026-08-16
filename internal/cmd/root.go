@@ -22,6 +22,7 @@ var (
 	provider     string
 	noSpinner    bool
 	noColor      bool
+	noConfirm    bool
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -33,9 +34,10 @@ PKGBUILD files for potential security issues before installation.
 
 It acts as a security layer between you and the Arch User Repository (AUR),
 analyzing packages for suspicious patterns, malicious code, and security risks.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runInstall(cmd.Context(), args)
-	},
+	// RunE is assigned in init(): it reaches runInstall, which reaches rootCmd
+	// again to print help, and Go rejects that as an initialization cycle when it
+	// is written as part of this literal.
+	//
 	// Allow unknown flags to be passed through to yay
 	FParseErrWhitelist: cobra.FParseErrWhitelist{
 		UnknownFlags: true,
@@ -54,13 +56,13 @@ func Execute(ctx context.Context) error {
 func init() {
 	cobra.OnInitialize(initConfig)
 
-	// Global flags
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is ${XDG_CONFIG_HOME:-$HOME/.config}/yay-friend/config.yaml)")
-	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
-	rootCmd.PersistentFlags().BoolVar(&skipAnalysis, "skip-analysis", false, "skip security analysis and proceed directly to yay")
-	rootCmd.PersistentFlags().StringVar(&provider, "provider", "", "AI provider to use (claude, qwen, copilot, goose)")
-	rootCmd.PersistentFlags().BoolVar(&noSpinner, "no-spinner", false, "disable spinner animations (useful for scripts/automation)")
-	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "disable colored output (NO_COLOR is also honored)")
+	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		return runInstall(cmd.Context(), args)
+	}
+
+	// Global flags. Declared from the same table the yay-style parser reads, so
+	// the two entry points cannot drift apart; see internal/cmd/args.go.
+	registerOwnFlags(rootCmd)
 
 	// Add yay-compatible flags
 	rootCmd.Flags().BoolP("sync", "S", false, "install packages")
@@ -96,8 +98,37 @@ func initConfig() {
 	ui.Configure(noColor, useColors)
 }
 
+// withNoConfirmFlag hands --noconfirm back to yay.
+//
+// Unknown flags reach yay untouched, which is how --noconfirm worked before it
+// was declared here: cobra never saw it and yay did. Declaring it consumed it,
+// so without this, asking yay-friend to stop prompting would have made yay start.
+func withNoConfirmFlag(flags []string, noConfirm bool) []string {
+	if !noConfirm {
+		return flags
+	}
+	for _, f := range flags {
+		if f == "--noconfirm" {
+			return flags
+		}
+	}
+	return append(flags, "--noconfirm")
+}
+
 // runInstall handles the main package installation workflow
 func runInstall(ctx context.Context, args []string) error {
+	// Naming no operation used to mean `yay -Syu`: a whole-system upgrade with
+	// nothing analyzed, reachable by typing the tool's name and pressing enter.
+	// That is a security wrapper's least defensible default. An upgrade is still
+	// one word away (`yay-friend -Syu`) -- it just has to be asked for.
+	//
+	// The check sits here rather than in RunE because both entry points converge
+	// on this function, and the flags-only case (`yay-friend --noconfirm`) never
+	// reaches cobra at all.
+	if len(args) == 0 {
+		return rootCmd.Help()
+	}
+
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
@@ -115,6 +146,8 @@ func runInstall(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to parse command: %w", err)
 	}
+
+	operation.Flags = withNoConfirmFlag(operation.Flags, noConfirm)
 
 	// Initialize yay client
 	yayClient := yay.NewYayClient(cfg.Yay.Path)
@@ -143,6 +176,11 @@ func runInstall(ctx context.Context, args []string) error {
 		_, err := yayClient.GetPackageInfo(ctx, pkg)
 		if err != nil {
 			// Package not found directly, might be a search query
+			// Which of several search hits was meant is not a confirmation, so
+			// --noconfirm has no answer to supply. Say that, rather than pick.
+			if noConfirm {
+				return fmt.Errorf("package %q not found and --noconfirm cannot choose among search results: name the package exactly", pkg)
+			}
 			ui.Say("package %q not found exactly, searching", pkg)
 
 			// Search for packages
@@ -195,6 +233,15 @@ func runInstall(ctx context.Context, args []string) error {
 		if allSafe {
 			ui.Blank()
 			ui.Say("all packages passed security analysis")
+
+			// Without -S the request was to analyze, and this prompt is an offer
+			// on top of that. --noconfirm declines unasked-for offers: it means
+			// stop asking, not start installing.
+			if noConfirm {
+				ui.Say("not installing: no -S given (--noconfirm declines the offer)")
+				return nil
+			}
+
 			ui.Ask("proceed with installation? [y/N]: ")
 
 			var response string
@@ -296,6 +343,11 @@ func handleAnalysisResult(analysis *types.SecurityAnalysis, cfg *types.Config) e
 			analysis.OverallLevel, cfg.SecurityThresholds.BlockLevel, cfg.SecurityThresholds.WarnLevel))
 	}
 
+	// The block threshold is checked before any auto-proceed is consulted, and
+	// nothing below can reach past it. --noconfirm answers questions; it is not a
+	// way to overrule the policy, or a security tool with a flag that turns it off
+	// is what this would be. Strictness is set by moving block_level, in config,
+	// deliberately.
 	if analysis.OverallLevel >= cfg.SecurityThresholds.BlockLevel {
 		ui.Blank()
 		ui.Say("%s blocked: %s entropy exceeds the %s threshold",
@@ -308,7 +360,11 @@ func handleAnalysisResult(analysis *types.SecurityAnalysis, cfg *types.Config) e
 		ui.Say("%s entropy is %s, at or above the warn threshold", analysis.PackageName, analysis.OverallLevel)
 
 		// Ask user for confirmation unless auto-proceed is enabled
-		if !cfg.SecurityThresholds.AutoProceed {
+		switch {
+		case cfg.SecurityThresholds.AutoProceed:
+		case noConfirm:
+			ui.Say("proceeding without confirmation (--noconfirm)")
+		default:
 			ui.Ask("continue with installation? [y/N]: ")
 			var response string
 			fmt.Scanln(&response)

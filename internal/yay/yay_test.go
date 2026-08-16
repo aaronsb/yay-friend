@@ -168,3 +168,27 @@ func TestYayFailureIsReported(t *testing.T) {
 		t.Fatal("GetPackageInfo succeeded, want error")
 	}
 }
+
+// TestBarePackageSeparatesFlags covers the branch taken when the first argument
+// is a package name rather than a yay operation. It used to file every argument
+// as a package, so `yay-friend pkg --needed` searched for a package named
+// "--needed" and offered an install selection instead of analyzing pkg.
+func TestBarePackageSeparatesFlags(t *testing.T) {
+	op, err := ParseYayCommand([]string{"ya-claude-code", "--needed", "another-pkg"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := op.Operation, "analyze"; got != want {
+		t.Errorf("Operation = %q, want %q", got, want)
+	}
+	if got, want := len(op.Packages), 2; got != want {
+		t.Fatalf("Packages = %v, want %d entries", op.Packages, want)
+	}
+	if op.Packages[0] != "ya-claude-code" || op.Packages[1] != "another-pkg" {
+		t.Errorf("Packages = %v, want the two package names only", op.Packages)
+	}
+	if len(op.Flags) != 1 || op.Flags[0] != "--needed" {
+		t.Errorf("Flags = %v, want [--needed]", op.Flags)
+	}
+}

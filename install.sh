@@ -74,10 +74,17 @@ check_prerequisites() {
         exit 1
     fi
     
-    # Check for Go (if building from source)
+    # Check for Go and make (if building from source)
     if [[ "$BUILD_FROM_SOURCE" == "true" ]]; then
         if ! command_exists go; then
             print_error "Go is not installed. Please install Go to build from source."
+            exit 1
+        fi
+        # The build is delegated to the Makefile, which is where the version
+        # label is derived; without make there is nothing to delegate to.
+        if ! command_exists make; then
+            print_error "make is not installed. Please install make to build from source."
+            print_info "On Arch: pacman -S make"
             exit 1
         fi
     fi
@@ -106,17 +113,10 @@ build_from_source() {
         ORIGINAL_DIR=$(pwd)
 
         print_info "Building binary with version info..."
-        # Get version info
-        VERSION=${VERSION:-"0.1.0"}
-        GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-        BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-        # Build with version info
-        LDFLAGS="-X github.com/aaronsb/yay-friend/internal/version.Version=${VERSION}"
-        LDFLAGS="${LDFLAGS} -X github.com/aaronsb/yay-friend/internal/version.GitCommit=${GIT_COMMIT}"
-        LDFLAGS="${LDFLAGS} -X github.com/aaronsb/yay-friend/internal/version.BuildDate=${BUILD_DATE}"
-
-        go build -ldflags "${LDFLAGS}" -o "$BINARY_NAME" ./cmd/yay-friend
+        # The Makefile owns the build, including how the version label is
+        # derived from git. This used to carry its own copy with VERSION
+        # hardcoded to 0.1.0, in two places in this file alone.
+        make build
 
         if [[ ! -f "$BINARY_NAME" ]]; then
             print_error "Failed to build binary"
@@ -131,17 +131,10 @@ build_from_source() {
         git clone "$REPO_URL" .
 
         print_info "Building binary with version info..."
-        # Get version info
-        VERSION=${VERSION:-"0.1.0"}
-        GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-        BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-        # Build with version info
-        LDFLAGS="-X github.com/aaronsb/yay-friend/internal/version.Version=${VERSION}"
-        LDFLAGS="${LDFLAGS} -X github.com/aaronsb/yay-friend/internal/version.GitCommit=${GIT_COMMIT}"
-        LDFLAGS="${LDFLAGS} -X github.com/aaronsb/yay-friend/internal/version.BuildDate=${BUILD_DATE}"
-
-        go build -ldflags "${LDFLAGS}" -o "$BINARY_NAME" ./cmd/yay-friend
+        # The Makefile owns the build, including how the version label is
+        # derived from git. This used to carry its own copy with VERSION
+        # hardcoded to 0.1.0, in two places in this file alone.
+        make build
 
         if [[ ! -f "$BINARY_NAME" ]]; then
             print_error "Failed to build binary"
