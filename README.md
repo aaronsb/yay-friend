@@ -146,8 +146,8 @@ the output and still watch the run.
 yay-friend analyze hello --json
 yay-friend analyze --file ./my-package --json
 
-# pacrat's shape: a grading of a staged tree
-PACRAT_PACKAGE=hello PACRAT_TREE=/path/to/tree PACRAT_COMMIT=51cec63… yay-friend grade
+# structured output: a grading of a staged tree
+YAY_FRIEND_PACKAGE=hello YAY_FRIEND_TREE=/path/to/tree YAY_FRIEND_COMMIT=51cec63… yay-friend grade
 ```
 
 #### `analyze --json`
@@ -175,9 +175,9 @@ to run the analysis twice to see what the analyzer actually said.
 stores the level as its integer, and a one-line `jq` filter usually wants the
 name and the bounds without having to know the enum.
 
-This is what makes yay-friend usable as a pacrat grader *without* the native
-`grade` subcommand — the shape a tool that has never heard of pacrat would
-pipe into place. The whole adapter is one filter:
+This is what makes yay-friend usable as a grader *without* the native `grade`
+subcommand — the shape a tool that speaks some other contract would pipe into
+place. The whole adapter is one filter:
 
 ```toml
 [[graders]]
@@ -191,15 +191,22 @@ timeout_s = 600
 ```
 
 Real, runnable, and deliberately the worse option — it drops the findings and
-re-analyzes without pacrat's commit-keyed replay — because its job is to show
-the *shape* of adapting an unknowing tool, next to the one-string registration
-below for a tool that speaks the contract itself.
+re-analyzes without the commit-keyed replay — because its job is to show the
+*shape* of adapting yay-friend to a contract it does not speak, next to the
+one-line registration below for the contract it does.
 
 #### `grade`
 
-[pacrat](https://github.com/aaronsb/pacrat) gates AUR updates on a grade from
-any program that speaks `pacrat-grade/v1`. `yay-friend grade` speaks it natively,
-so registering it is one line:
+`yay-friend grade` is the machine-readable interface: JSON for another program to
+read, rather than the rendered report a person reads. It answers one question —
+how alarming is this tree, on a scale it declares — and leaves what to do about
+the answer to the caller. That narrowness is what makes yay-friend composable:
+any tool that manages packages can ask for a second opinion without yay-friend
+knowing what the tool intends to do with it.
+
+[pacrat](https://github.com/aaronsb/pacrat), which manages packages on
+pacman/AUR machines, is the reference consumer and the source of the wire
+format's name, `pacrat-grade/v1`. Registering yay-friend there is one line:
 
 ```toml
 [[graders]]
@@ -209,15 +216,18 @@ timeout_s = 600
 scale = { min = 0, max = 4 }
 ```
 
-The subject arrives in the environment — `PACRAT_PACKAGE`, `PACRAT_TREE`,
-`PACRAT_COMMIT` — and `--package/--tree/--commit` override it, so you can drive
-the same command by hand:
+The subject arrives in the environment — `YAY_FRIEND_PACKAGE`,
+`YAY_FRIEND_TREE`, `YAY_FRIEND_COMMIT` — and `--package/--tree/--commit`
+override it, so you can drive the same command by hand:
 
 ```bash
-PACRAT_PACKAGE=hello PACRAT_TREE=/path/to/tree PACRAT_COMMIT=51cec63… yay-friend grade
+YAY_FRIEND_PACKAGE=hello YAY_FRIEND_TREE=/path/to/tree YAY_FRIEND_COMMIT=51cec63… yay-friend grade
 ```
 
-What gets read is the tree you were handed: the PKGBUILD pacrat staged, its
+The `PACRAT_*` spelling is still read, so an existing pacrat install keeps
+working untouched; the `YAY_FRIEND_*` names win if both are set.
+
+What gets read is the tree you were handed: the PKGBUILD the caller staged, its
 `.install` hook and any file shipped beside it, not a fresh fetch of whatever
 the AUR is serving now. The result is filed in the usual cache under (package,
 commit), so a second ask about the same tree replays instead of calling a model.
@@ -233,14 +243,15 @@ commit), so a second ask about the same tree replays instead of calling a model.
             "recommendation": "PROCEED", "yay_friend_version": "1.0.0" } }
 ```
 
-`grade` is entropy, on 0-4, and only that. PROCEED / WARN / BLOCK is pacrat's to
-derive with the host's own thresholds; yay-friend's own recommendation rides
-along in `meta`, where it is advisory and cannot move a verdict.
+`grade` is entropy, on 0-4, and only that. What to do about that number — pacrat
+spells it PROCEED / WARN / BLOCK — is the caller's to derive with its own
+thresholds; yay-friend's own recommendation rides along in `meta`, where it is
+advisory and cannot move a verdict.
 
 Any failure — no provider configured, the model unreachable, an unreadable tree,
 an entropy that will not fit the scale — is a nonzero exit with the reason on
-stderr and **no JSON at all**. pacrat reads that as UNGRADED, which holds; a
-half-report is worse than none.
+stderr and **no JSON at all**, which a caller should read as "no grading" (pacrat
+calls it UNGRADED, and holds); a half-report is worse than none.
 
 ### Cache Management
 `yay-friend` intelligently caches analysis results using AUR git commit hashes to avoid redundant AI calls for unchanged packages.
@@ -383,9 +394,9 @@ wear it, so you can always tell which lines came from the analyzer.
 - **Entropy Analysis Engine**: Multi-factor security assessment
 - **Provider Interface**: Modular AI backend system
 - **Configuration Management**: User preferences and thresholds
-- **Grading Contract** (`internal/grade`): translation of an analysis into
-  `pacrat-grade/v1`, and the whole of yay-friend's side of that boundary — the
-  contract is a JSON shape, so speaking it is a marshalling concern and stays
+- **Structured Output** (`internal/grade`): translation of an analysis into the
+  JSON grading contract, and the whole of yay-friend's side of that boundary —
+  the contract is a JSON shape, so speaking it is a marshalling concern and stays
   well away from the analyzer
 
 ## Directory Structure

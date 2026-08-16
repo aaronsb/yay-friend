@@ -1,20 +1,24 @@
-// Package grade translates a yay-friend security analysis into a
-// pacrat-grade/v1 report.
+// Package grade turns a yay-friend security analysis into structured output: a
+// small JSON report meant to be read by another program rather than by a person.
 //
-// pacrat (https://github.com/aaronsb/pacrat) gates AUR package updates on a
-// grade produced by any program that speaks its contract. The contract is
-// deliberately narrow: a grader answers "how alarming is this tree, on a scale
-// it declares", and nothing else. PROCEED / WARN / BLOCK is pacrat's data,
-// derived from that number by the host's own thresholds — so nothing in this
-// package recommends, gates, or approves. yay-friend's own recommendation rides
-// along in meta, where it is advisory and cannot move a verdict.
+// The contract is deliberately narrow. yay-friend answers one question — "how
+// alarming is this tree, on a scale it declares" — and nothing else. What to do
+// about that number is the calling program's decision, made with its own
+// thresholds, so nothing in this package recommends, gates, or approves.
+// yay-friend's own recommendation rides along in meta, where it is advisory and
+// cannot move a verdict.
 //
-// This package is yay-friend's side of that boundary, and the whole of it: the
-// contract is a JSON shape, so translating to it is a marshalling concern and
-// belongs nowhere near the analyzer. What was previously done outside this repo
-// by contrib/graders/yay-friend-grade — a jq program in pacrat's tree — now
-// happens here, and the numbers it produces are identical by construction (see
-// the mapping notes on FromAnalysis).
+// That separation is what makes yay-friend referenceable: any host that wants a
+// second opinion on a package can call it, without yay-friend needing to know
+// what the host intends to do with the answer. pacrat
+// (https://github.com/aaronsb/pacrat), which manages packages on pacman/AUR
+// machines, is the reference consumer and the source of the wire format's name;
+// it is not the only possible one, and nothing here is written to assume it.
+//
+// Translating to a JSON shape is a marshalling concern and belongs nowhere near
+// the analyzer, so this package is the whole of that boundary. It replaces a jq
+// program that used to live outside this repo, and produces identical numbers by
+// construction (see the mapping notes on FromAnalysis).
 package grade
 
 import (
@@ -27,34 +31,40 @@ import (
 )
 
 const (
-	// Contract is compared byte for byte by pacrat. A report written to a
-	// contract it does not know is not read at all.
+	// Contract identifies the wire format, and a reader compares it byte for
+	// byte: a report written to a contract it does not know is not read at all.
+	//
+	// The value keeps pacrat's spelling because pacrat shipped first and is the
+	// reference consumer. That makes it a compatibility constant, not a
+	// statement about who may call this -- renaming it would break every
+	// existing reader to describe the same bytes.
 	Contract = "pacrat-grade/v1"
 
-	// Grader names the producer. Informational: pacrat files a grading under
-	// the name in its own config and only mentions this one if they differ.
+	// Grader names the producer. Informational: a host generally files a grading
+	// under the name in its own config and only mentions this one if they differ.
 	Grader = "yay-friend"
 
-	// ScaleMin and ScaleMax are yay-friend's entropy scale, which happens to be
-	// pacrat's default. Declared explicitly all the same: it costs one line and
-	// it makes a later change to the output visible instead of silent.
+	// ScaleMin and ScaleMax are yay-friend's entropy scale. Declared in the
+	// report rather than assumed by the reader: a grade means nothing without
+	// the range it sits on, and stating it makes a later change to the output
+	// visible instead of silent.
 	ScaleMin = 0
 	ScaleMax = int(types.EntropyCritical)
 
-	// maxFindings bounds the advisory list. pacrat shows the five worst and
-	// counts the rest, so a hundred annotations buy nothing and a grading is
+	// maxFindings bounds the advisory list. A reader typically shows the worst
+	// few and counts the rest, so a hundred annotations buy nothing and this is
 	// supposed to be a few kilobytes of JSON.
 	maxFindings = 25
 
 	// maxTitle and maxNote bound two strings that pass through a file an
-	// attacker may have written. pacrat neuters control characters and flattens
-	// each string onto one line before display; a grader that leans on its
-	// reader to sanitize is a grader that breaks the next reader.
+	// attacker may have written. They are sanitized here, on the way out: a
+	// producer that leans on its reader to do it works only for readers that
+	// happen to, and breaks the next one.
 	maxTitle = 240
 	maxNote  = 200
 )
 
-// Report is a pacrat-grade/v1 grading.
+// Report is one grading, in the structured output format.
 type Report struct {
 	Contract string    `json:"contract"`
 	Grader   string    `json:"grader"`
@@ -65,9 +75,9 @@ type Report struct {
 	Meta     Meta      `json:"meta"`
 }
 
-// Subject is what was graded. package and commit are echoed back exactly as
-// pacrat spelled them: pacrat compares them against its own idea of the subject
-// and discards a grading of anything else.
+// Subject is what was graded. package and commit are echoed back exactly as the
+// caller spelled them, so the caller can check the grading is about the tree it
+// asked about and discard one that answers a different question.
 type Subject struct {
 	Package string `json:"package"`
 	Commit  string `json:"commit"`
@@ -88,8 +98,9 @@ type Finding struct {
 	Span  string `json:"span,omitempty"`
 }
 
-// Meta is opaque to pacrat and preserved verbatim, with one convention: Note is
-// printed under the result, so yay-friend's one-line summary goes there.
+// Meta is opaque to the reader and preserved verbatim, with one convention:
+// Note is meant for display under the result, so yay-friend's one-line summary
+// goes there.
 type Meta struct {
 	Cached           bool   `json:"cached"`
 	Provider         string `json:"provider,omitempty"`
@@ -100,7 +111,7 @@ type Meta struct {
 
 // FromAnalysis builds a grading of subj from a yay-friend analysis.
 //
-// The mapping is fixed by what the contrib adapter already did, so that a host
+// The mapping is fixed by what the earlier external adapter did, so that a host
 // running the old shim and a host running this subcommand read the same numbers
 // off the same tree:
 //
@@ -110,7 +121,7 @@ type Meta struct {
 //     both are the approximation the contract says to decline.
 //   - a finding's level is its entropy, clamped instead. Finding levels are
 //     advisory and do not move the grade, so a level outside 0-255 would be
-//     rejected by pacrat's parser and cost a whole grading over one annotation.
+//     rejected by a strict parser and cost a whole grading over one annotation.
 //   - a finding's span is PKGBUILD:<line> when the analyzer reported a line, and
 //     absent otherwise. yay-friend does not record which file a finding came
 //     from, so the adapter's per-file span was already always the PKGBUILD.
@@ -201,7 +212,7 @@ func clamp(level int) int {
 }
 
 // oneline flattens s onto a single line and strips the control characters that
-// would let a hostile PKGBUILD forge a line of pacrat's own report. Whitespace
+// would let a hostile PKGBUILD forge a line of the caller's own output. Whitespace
 // collapses first, so a newline becomes a space rather than welding two words
 // together when the remaining controls are removed.
 func oneline(s string) string {

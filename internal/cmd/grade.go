@@ -31,12 +31,17 @@ func newGradeCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "grade",
-		Short: "Emit a pacrat-grade/v1 grading of a staged package tree",
-		Long: `Grade a staged package tree and write a pacrat-grade/v1 report to stdout.
+		Short: "Grade a staged package tree as structured output",
+		Long: `Grade a staged package tree and write a structured output report to stdout.
 
-This is the grader interface of pacrat (https://github.com/aaronsb/pacrat), which
-gates AUR updates on a grade from any program that speaks the contract. The
-subject arrives in the environment, so registering yay-friend is one line:
+This is yay-friend's machine-readable interface: JSON for another program to
+read, rather than the rendered report a person reads. Any tool that manages
+packages can call it for a second opinion without yay-friend knowing what the
+tool intends to do with the answer.
+
+The subject can arrive as flags or in the environment, so wiring yay-friend into
+a host is usually one line of that host's config. With pacrat
+(https://github.com/aaronsb/pacrat), the reference consumer:
 
     [[graders]]
     name = "yay-friend"
@@ -44,22 +49,28 @@ subject arrives in the environment, so registering yay-friend is one line:
     timeout_s = 600
     scale = { min = 0, max = 4 }
 
-The tree is what gets read — the PKGBUILD pacrat staged, its .install hook and
-any file shipped beside it — not a fresh fetch of whatever the AUR is serving
-now. The result is filed in yay-friend's own cache under the commit, so a second
-ask about the same tree replays instead of calling a model again.
+The tree is what gets read — the PKGBUILD the caller staged, its .install hook
+and any file shipped beside it — not a fresh fetch of whatever the AUR is
+serving now. The result is filed in yay-friend's own cache under the commit, so
+a second ask about the same tree replays instead of calling a model again.
 
 stdout carries the grading and nothing else. Any failure is a nonzero exit with
-the reason on stderr and no JSON at all: pacrat reads that as UNGRADED, which
-holds, and a half-report is worse than none.
+the reason on stderr and no JSON at all, which a caller should read as "no
+grading" — a half-report is worse than none.
 
-The grade is how alarming the tree is, on 0-4, and only that. PROCEED / WARN /
-BLOCK is pacrat's to derive from it with the host's own thresholds.`,
+The grade is how alarming the tree is, on 0-4, and only that. What to do about
+that number is the caller's decision, made with its own thresholds.
+
+The report declares its contract as pacrat-grade/v1. That is the wire format's
+name, kept as-is so existing readers keep working; it does not limit who may
+call this.`,
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// stdout is reserved for the grading from here on.
+			// stdout is reserved for the grading from here on. Warnings move
+			// with it, so everything yay-friend narrates leaves by one door.
 			ui.Out = cmd.ErrOrStderr()
+			ui.Err = cmd.ErrOrStderr()
 
 			return withUsage(cmd, func() error {
 				return runGrade(cmd.Context(), flags, cmd.OutOrStdout())
@@ -67,9 +78,9 @@ BLOCK is pacrat's to derive from it with the host's own thresholds.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&flags.pkg, "package", "", "Package name (default $PACRAT_PACKAGE)")
-	cmd.Flags().StringVar(&flags.tree, "tree", "", "Directory holding the PKGBUILD to grade (default $PACRAT_TREE)")
-	cmd.Flags().StringVar(&flags.commit, "commit", "", "Commit the tree is at, as a hex object id (default $PACRAT_COMMIT)")
+	cmd.Flags().StringVar(&flags.pkg, "package", "", "Package name (default $YAY_FRIEND_PACKAGE, or $PACRAT_PACKAGE)")
+	cmd.Flags().StringVar(&flags.tree, "tree", "", "Directory holding the PKGBUILD to grade (default $YAY_FRIEND_TREE, or $PACRAT_TREE)")
+	cmd.Flags().StringVar(&flags.commit, "commit", "", "Commit the tree is at, as a hex object id (default $YAY_FRIEND_COMMIT, or $PACRAT_COMMIT)")
 
 	return cmd
 }
@@ -77,6 +88,15 @@ BLOCK is pacrat's to derive from it with the host's own thresholds.`,
 func runGrade(ctx context.Context, flags subject, out io.Writer) error {
 	subj, err := resolveSubject(flags)
 	if err != nil {
+		return err
+	}
+
+	// Checked before the cache is consulted, so both paths agree on what a
+	// gradeable subject is. Skipping it on a hit meant an unreadable --tree
+	// still produced a grading, just one with subject.version quietly missing:
+	// the tree is where that field comes from, and nothing else noticed it had
+	// not been read.
+	if err := validateTree(subj.tree); err != nil {
 		return err
 	}
 
@@ -88,7 +108,7 @@ func runGrade(ctx context.Context, flags subject, out io.Writer) error {
 	// The cache is keyed by the commit in lowercase, because git and yay-friend
 	// both spell object ids that way; an uppercase request would otherwise miss
 	// an entry sitting right there and spend a real analysis discovering it. The
-	// grading still reports the commit as pacrat spelled it.
+	// grading still reports the commit as the caller spelled it.
 	key := strings.ToLower(subj.commit)
 
 	var cacheManager *cache.CacheManager
@@ -140,10 +160,20 @@ func runGrade(ctx context.Context, flags subject, out io.Writer) error {
 		}
 	}
 
+	// The tree is readable by now, so an empty version means it declares none --
+	// no .SRCINFO and a PKGBUILD with no pkgver, or one that will not parse.
+	// The field is optional in the contract and a grading is still worth
+	// emitting without it, but silently dropping the one piece of the subject
+	// that says *which* version was graded is how it went missing before.
+	subjectVersion := treeVersion(subj.tree)
+	if subjectVersion == "" {
+		ui.Warn("no version declared in %s (.SRCINFO absent or unparseable, PKGBUILD has no pkgver); omitting subject.version", subj.tree)
+	}
+
 	report, err := grade.FromAnalysis(grade.Subject{
 		Package: subj.pkg,
 		Commit:  subj.commit,
-		Version: treeVersion(subj.tree),
+		Version: subjectVersion,
 	}, analysis, cached, producedBy)
 	if err != nil {
 		return err
@@ -162,19 +192,25 @@ func runGrade(ctx context.Context, flags subject, out io.Writer) error {
 }
 
 // resolveSubject takes the subject from the flags, falling back to the
-// PACRAT_* environment variables pacrat exports for every grader run. Flags win
-// when both are present, so a human can drive the same command by hand.
+// environment. Flags win, so a human can drive the same command by hand.
+//
+// Two spellings are read for each value. YAY_FRIEND_* is the name a host should
+// set: this is yay-friend's own interface, and nothing about it is specific to
+// one caller. PACRAT_* is still honored because pacrat shipped against it and
+// exports it for every grader run -- dropping it would break working installs to
+// rename a variable, which is not a trade worth making. The canonical name wins
+// if a host sets both.
 func resolveSubject(flags subject) (subject, error) {
 	subj := subject{
-		pkg:    firstNonEmpty(flags.pkg, os.Getenv("PACRAT_PACKAGE")),
-		tree:   firstNonEmpty(flags.tree, os.Getenv("PACRAT_TREE")),
-		commit: firstNonEmpty(flags.commit, os.Getenv("PACRAT_COMMIT")),
+		pkg:    firstNonEmpty(flags.pkg, os.Getenv("YAY_FRIEND_PACKAGE"), os.Getenv("PACRAT_PACKAGE")),
+		tree:   firstNonEmpty(flags.tree, os.Getenv("YAY_FRIEND_TREE"), os.Getenv("PACRAT_TREE")),
+		commit: firstNonEmpty(flags.commit, os.Getenv("YAY_FRIEND_COMMIT"), os.Getenv("PACRAT_COMMIT")),
 	}
 
 	for _, missing := range []struct{ value, flag, env string }{
-		{subj.pkg, "--package", "PACRAT_PACKAGE"},
-		{subj.tree, "--tree", "PACRAT_TREE"},
-		{subj.commit, "--commit", "PACRAT_COMMIT"},
+		{subj.pkg, "--package", "YAY_FRIEND_PACKAGE"},
+		{subj.tree, "--tree", "YAY_FRIEND_TREE"},
+		{subj.commit, "--commit", "YAY_FRIEND_COMMIT"},
 	} {
 		if missing.value == "" {
 			return subject{}, usageError{fmt.Errorf("no subject to grade: %s is required, or set %s",
@@ -182,9 +218,9 @@ func resolveSubject(flags subject) (subject, error) {
 		}
 	}
 
-	// pacrat validates these too, but a grader that only works when its caller
-	// is careful is a grader that breaks the first time it is run by hand. Both
-	// become path components in the cache.
+	// A caller may validate these too, but a grader that only works when its
+	// caller is careful is a grader that breaks the first time it is run by
+	// hand. Both become path components in the cache.
 	if err := validatePackageName(subj.pkg); err != nil {
 		return subject{}, usageError{err}
 	}
@@ -210,16 +246,30 @@ func validatePackageName(name string) error {
 	return nil
 }
 
+// validateTree checks that the staged tree is there to be read. It is a
+// precondition of grading at all, not of analyzing: the version reported in the
+// subject is read from this directory on every run, cache hit included.
+func validateTree(tree string) error {
+	info, err := os.Stat(tree)
+	if err != nil {
+		return fmt.Errorf("cannot read tree %s: %w", tree, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("tree %s is not a directory", tree)
+	}
+	return nil
+}
+
 func validateCommit(commit string) error {
 	for _, r := range commit {
 		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
 			return fmt.Errorf("%q is not a commit hash", commit)
 		}
 	}
-	// Seven is the shortest prefix git will abbreviate to, and the shortest
-	// pacrat compares. Sixty-four admits the SHA-256 object ids git is moving
-	// toward. Bounded at all so an impossible commit is refused before the miss
-	// path spends a model call discovering that no such tree exists.
+	// Seven is the shortest prefix git will abbreviate to. Sixty-four admits the
+	// SHA-256 object ids git is moving toward. Bounded at all so an impossible
+	// commit is refused before the miss path spends a model call discovering
+	// that no such tree exists.
 	if len(commit) < 7 {
 		return fmt.Errorf("commit %q is too short to name a tree", commit)
 	}
@@ -229,22 +279,14 @@ func validateCommit(commit string) error {
 	return nil
 }
 
-// readSubjectTree collects the bytes under judgement: the PKGBUILD pacrat
+// readSubjectTree collects the bytes under judgement: the PKGBUILD the caller
 // staged and every companion file it references.
 //
-// The name and commit come from the subject rather than from the tree. pacrat
-// discards a grading whose subject is not the one it asked about, and a
-// PKGBUILD is untrusted input — letting it name itself would be letting it pick
-// which cache entry the grading lands in.
+// The name and commit come from the subject rather than from the tree. The
+// caller checks a grading is about the subject it asked about, and a PKGBUILD is
+// untrusted input — letting it name itself would be letting it pick which cache
+// entry the grading lands in.
 func readSubjectTree(subj subject) (types.PackageInfo, error) {
-	info, err := os.Stat(subj.tree)
-	if err != nil {
-		return types.PackageInfo{}, fmt.Errorf("cannot read tree %s: %w", subj.tree, err)
-	}
-	if !info.IsDir() {
-		return types.PackageInfo{}, fmt.Errorf("tree %s is not a directory", subj.tree)
-	}
-
 	pkgInfo, _, err := collectPackageTree(filepath.Join(subj.tree, "PKGBUILD"))
 	if err != nil {
 		return types.PackageInfo{}, err

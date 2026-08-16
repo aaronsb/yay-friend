@@ -39,9 +39,9 @@ func withNoConfirm(t *testing.T, v bool) {
 // quietUI sends rendered output nowhere, so a test reads as its assertions.
 func quietUI(t *testing.T) {
 	t.Helper()
-	prev := ui.Out
-	ui.Out = io.Discard
-	t.Cleanup(func() { ui.Out = prev })
+	prevOut, prevErr := ui.Out, ui.Err
+	ui.Out, ui.Err = io.Discard, io.Discard
+	t.Cleanup(func() { ui.Out, ui.Err = prevOut, prevErr })
 }
 
 // closedStdin stands in for a pipe with nothing on it. A prompt that reaches
