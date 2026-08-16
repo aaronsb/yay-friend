@@ -11,6 +11,7 @@ import (
 
 	"github.com/aaronsb/yay-friend/internal/pkgbuild"
 	"github.com/aaronsb/yay-friend/internal/types"
+	"github.com/aaronsb/yay-friend/internal/ui"
 )
 
 // PackageSearchResult represents a search result from yay
@@ -46,14 +47,10 @@ func (y *YayClient) IsAvailable() error {
 
 // GetPackageInfo fetches PKGBUILD and metadata for a package
 func (y *YayClient) GetPackageInfo(ctx context.Context, packageName string) (*types.PackageInfo, error) {
-	// Get PKGBUILD content
-	cmd := exec.CommandContext(ctx, y.yayPath, "-G", "--print", packageName)
-	output, err := cmd.Output()
+	src, err := y.fetchPKGBUILD(ctx, packageName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get PKGBUILD for %s: %w", packageName, err)
+		return nil, err
 	}
-
-	src := string(output)
 
 	// Parse PKGBUILD for metadata. Name stays as the caller requested it: for a
 	// split package the requested name is the authoritative one, and it need not
@@ -80,6 +77,50 @@ func (y *YayClient) GetPackageInfo(ctx context.Context, packageName string) (*ty
 	info.Maintainer = vars.Maintainer()
 
 	return info, nil
+}
+
+// fetchPKGBUILD returns the PKGBUILD source yay holds for a package.
+//
+// yay resolves a binary repository ahead of the AUR, so for a package carried by
+// both -- an AUR package that some third-party repo also ships prebuilt -- the
+// default fetch asks Arch's packaging GitLab for a project that was never there.
+// GitLab answers that with a redirect to its sign-in page, and yay prints those
+// 19 KB of HTML as though they were the PKGBUILD. It exits 0 doing so, as it does
+// for every other failure on this path ("Unable to find the following packages"
+// is also a clean exit), which leaves the returned content as the only signal
+// worth reading. So: check what came back, and ask the AUR directly before
+// concluding there is nothing to analyze.
+func (y *YayClient) fetchPKGBUILD(ctx context.Context, packageName string) (string, error) {
+	src, err := y.printPKGBUILD(ctx, packageName)
+	if err == nil && pkgbuild.LooksLike(src) {
+		return src, nil
+	}
+
+	// --aur is the fallback rather than the default because it is the narrower
+	// question: it fails outright for the official packages the plain fetch
+	// serves correctly.
+	aurSrc, aurErr := y.printPKGBUILD(ctx, packageName, "--aur")
+	if aurErr == nil && pkgbuild.LooksLike(aurSrc) {
+		ui.Warn("%s: the repository source returned no PKGBUILD; analyzing the AUR PKGBUILD instead", packageName)
+		return aurSrc, nil
+	}
+
+	if err != nil {
+		return "", fmt.Errorf("failed to get PKGBUILD for %s: %w", packageName, err)
+	}
+	// Refusing here is the point. The caller's next move is to hand this to an
+	// analyzer and report a verdict on it, and a verdict rendered over a sign-in
+	// page reads exactly like a verdict rendered over a clean package.
+	return "", fmt.Errorf("no PKGBUILD found for %s: yay returned %d bytes declaring no pkgname", packageName, len(strings.TrimSpace(src)))
+}
+
+// printPKGBUILD runs `yay -G --print` and returns its stdout verbatim.
+func (y *YayClient) printPKGBUILD(ctx context.Context, packageName string, extraArgs ...string) (string, error) {
+	args := append([]string{"-G", "--print"}, extraArgs...)
+	args = append(args, packageName)
+
+	output, err := exec.CommandContext(ctx, y.yayPath, args...).Output()
+	return string(output), err
 }
 
 // InstallPackages runs yay to install packages

@@ -11,7 +11,19 @@ import (
 	"time"
 
 	"github.com/aaronsb/yay-friend/internal/types"
+	"github.com/aaronsb/yay-friend/internal/version"
 )
+
+// CurrentCacheVersion is the schema of entries this build writes and the only
+// one it will read back.
+//
+// Bump it whenever a change alters what gets analyzed, not merely how a result
+// is stored. Entries are keyed by AUR commit hash, so a package whose PKGBUILD
+// has not moved is never re-analyzed on its own -- which means a verdict reached
+// over the wrong input stays authoritative forever unless something retires it.
+// 2.0 retires everything written before the fetch fix, when a package shadowed
+// by a binary repository was graded against Arch GitLab's sign-in page.
+const CurrentCacheVersion = "2.0"
 
 // CacheManager handles analysis result caching
 type CacheManager struct {
@@ -112,6 +124,13 @@ func (c *CacheManager) GetCachedEntry(packageName, commitHash string) (*CachedAn
 		return nil, fmt.Errorf("cache corruption: entry declares package %q, not %q",
 			cached.CacheMetadata.PackageName, packageName)
 	}
+	// An entry from an older schema is a miss, not an error: the caller's
+	// response to a miss is to analyze the package again, which is exactly what
+	// a retired entry needs.
+	if cached.CacheMetadata.CacheVersion != CurrentCacheVersion {
+		return nil, fmt.Errorf("cache miss: entry for %s@%s was written by cache version %q, want %q",
+			packageName, ShortHash(commitHash), cached.CacheMetadata.CacheVersion, CurrentCacheVersion)
+	}
 
 	return &cached, nil
 }
@@ -130,8 +149,8 @@ func (c *CacheManager) SaveAnalysis(packageName, commitHash string, analysis *ty
 			CommitHash:       commitHash,
 			PackageName:      packageName,
 			CachedAt:         time.Now(),
-			CacheVersion:     "1.0",
-			YayFriendVersion: "1.0.0", // TODO: Get this from build info
+			CacheVersion:     CurrentCacheVersion,
+			YayFriendVersion: version.Version,
 		},
 		Analysis: analysis,
 	}
