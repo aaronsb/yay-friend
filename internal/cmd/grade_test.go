@@ -134,10 +134,10 @@ func gradeHarness(t *testing.T) (*fakeProvider, string, gradeRunner) {
 	resolveProvider = func(ctx context.Context, cfg *types.Config) (types.AIProvider, error) {
 		return fake, nil
 	}
-	out := ui.Out
+	out, errOut := ui.Out, ui.Err
 	t.Cleanup(func() {
 		resolveProvider = restore
-		ui.Out = out
+		ui.Out, ui.Err = out, errOut
 	})
 
 	run := func(args ...string) (string, string, error) {
@@ -610,5 +610,84 @@ func TestContractIsUnchangedByTheRename(t *testing.T) {
 	if grade.Contract != "pacrat-grade/v1" {
 		t.Errorf("contract = %q, want %q: renaming it breaks every existing reader",
 			grade.Contract, "pacrat-grade/v1")
+	}
+}
+
+// TestUnreadableTreeFailsEvenOnACacheHit is the defect this guards. The tree was
+// only validated on the miss path, so a cached (package, commit) answered with a
+// grading no matter what --tree pointed at -- and subject.version, which is read
+// from that directory, came back empty with nothing saying why.
+func TestUnreadableTreeFailsEvenOnACacheHit(t *testing.T) {
+	fake, tree, run := gradeHarness(t)
+
+	// Warm the cache for this subject.
+	if _, stderr, err := run("--package", "hello", "--tree", tree, "--commit", testCommit); err != nil {
+		t.Fatalf("priming run failed: %v\n%s", err, stderr)
+	}
+	if fake.calls != 1 {
+		t.Fatalf("priming run made %d provider calls, want 1", fake.calls)
+	}
+
+	stdout, _, err := run("--package", "hello", "--tree", filepath.Join(t.TempDir(), "gone"), "--commit", testCommit)
+	if err == nil {
+		t.Fatalf("a grading was emitted for an unreadable tree: %s", stdout)
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q, want nothing: a failure emits no JSON at all", stdout)
+	}
+	if !strings.Contains(err.Error(), "cannot read tree") {
+		t.Errorf("error = %v, want it to name the unreadable tree", err)
+	}
+}
+
+// TestVersionSurvivesACacheHit is the positive half: the replay path must report
+// the same subject as the run that populated the cache.
+func TestVersionSurvivesACacheHit(t *testing.T) {
+	fake, tree, run := gradeHarness(t)
+
+	fresh, stderr, err := run("--package", "hello", "--tree", tree, "--commit", testCommit)
+	if err != nil {
+		t.Fatalf("first run failed: %v\n%s", err, stderr)
+	}
+	replayed, stderr, err := run("--package", "hello", "--tree", tree, "--commit", testCommit)
+	if err != nil {
+		t.Fatalf("replay failed: %v\n%s", err, stderr)
+	}
+	if fake.calls != 1 {
+		t.Errorf("provider called %d times, want 1: the second run should replay", fake.calls)
+	}
+
+	first, second := decodeGrading(t, fresh), decodeGrading(t, replayed)
+	if second.Subject.Version == "" {
+		t.Error("subject.version is empty on the replay")
+	}
+	if first.Subject != second.Subject {
+		t.Errorf("subject changed on replay: %+v then %+v", first.Subject, second.Subject)
+	}
+}
+
+// TestTreeWithNoDeclaredVersionSaysSo covers the remaining way version can be
+// empty: a readable tree that simply declares none. That is not a failure -- the
+// field is optional -- but it is said out loud rather than left to be noticed.
+func TestTreeWithNoDeclaredVersionSaysSo(t *testing.T) {
+	_, _, run := gradeHarness(t)
+
+	tree := t.TempDir()
+	// A PKGBUILD with no pkgver, and no .SRCINFO beside it.
+	if err := os.WriteFile(filepath.Join(tree, "PKGBUILD"),
+		[]byte("pkgname=hello\npkgdesc='no version here'\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := run("--package", "hello", "--tree", tree, "--commit", testCommit)
+	if err != nil {
+		t.Fatalf("grade failed: %v\n%s", err, stderr)
+	}
+	report := decodeGrading(t, stdout)
+	if report.Subject.Version != "" {
+		t.Errorf("subject.version = %q, want empty for a tree declaring none", report.Subject.Version)
+	}
+	if !strings.Contains(stderr, "no version declared") {
+		t.Errorf("stderr = %q, want it to say the version could not be determined", stderr)
 	}
 }

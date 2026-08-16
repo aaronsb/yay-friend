@@ -57,6 +57,7 @@ contract does; for the structured output report, use "yay-friend grade".`,
 			} else {
 				ui.Out = cmd.OutOrStdout()
 			}
+			ui.Err = cmd.ErrOrStderr()
 
 			return withUsage(cmd, func() error {
 				if fileFlag != "" {

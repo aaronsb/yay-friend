@@ -67,8 +67,10 @@ call this.`,
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// stdout is reserved for the grading from here on.
+			// stdout is reserved for the grading from here on. Warnings move
+			// with it, so everything yay-friend narrates leaves by one door.
 			ui.Out = cmd.ErrOrStderr()
+			ui.Err = cmd.ErrOrStderr()
 
 			return withUsage(cmd, func() error {
 				return runGrade(cmd.Context(), flags, cmd.OutOrStdout())
@@ -86,6 +88,15 @@ call this.`,
 func runGrade(ctx context.Context, flags subject, out io.Writer) error {
 	subj, err := resolveSubject(flags)
 	if err != nil {
+		return err
+	}
+
+	// Checked before the cache is consulted, so both paths agree on what a
+	// gradeable subject is. Skipping it on a hit meant an unreadable --tree
+	// still produced a grading, just one with subject.version quietly missing:
+	// the tree is where that field comes from, and nothing else noticed it had
+	// not been read.
+	if err := validateTree(subj.tree); err != nil {
 		return err
 	}
 
@@ -149,10 +160,20 @@ func runGrade(ctx context.Context, flags subject, out io.Writer) error {
 		}
 	}
 
+	// The tree is readable by now, so an empty version means it declares none --
+	// no .SRCINFO and a PKGBUILD with no pkgver, or one that will not parse.
+	// The field is optional in the contract and a grading is still worth
+	// emitting without it, but silently dropping the one piece of the subject
+	// that says *which* version was graded is how it went missing before.
+	subjectVersion := treeVersion(subj.tree)
+	if subjectVersion == "" {
+		ui.Warn("no version declared in %s (.SRCINFO absent or unparseable, PKGBUILD has no pkgver); omitting subject.version", subj.tree)
+	}
+
 	report, err := grade.FromAnalysis(grade.Subject{
 		Package: subj.pkg,
 		Commit:  subj.commit,
-		Version: treeVersion(subj.tree),
+		Version: subjectVersion,
 	}, analysis, cached, producedBy)
 	if err != nil {
 		return err
@@ -225,6 +246,20 @@ func validatePackageName(name string) error {
 	return nil
 }
 
+// validateTree checks that the staged tree is there to be read. It is a
+// precondition of grading at all, not of analyzing: the version reported in the
+// subject is read from this directory on every run, cache hit included.
+func validateTree(tree string) error {
+	info, err := os.Stat(tree)
+	if err != nil {
+		return fmt.Errorf("cannot read tree %s: %w", tree, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("tree %s is not a directory", tree)
+	}
+	return nil
+}
+
 func validateCommit(commit string) error {
 	for _, r := range commit {
 		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
@@ -252,14 +287,6 @@ func validateCommit(commit string) error {
 // untrusted input — letting it name itself would be letting it pick which cache
 // entry the grading lands in.
 func readSubjectTree(subj subject) (types.PackageInfo, error) {
-	info, err := os.Stat(subj.tree)
-	if err != nil {
-		return types.PackageInfo{}, fmt.Errorf("cannot read tree %s: %w", subj.tree, err)
-	}
-	if !info.IsDir() {
-		return types.PackageInfo{}, fmt.Errorf("tree %s is not a directory", subj.tree)
-	}
-
 	pkgInfo, _, err := collectPackageTree(filepath.Join(subj.tree, "PKGBUILD"))
 	if err != nil {
 		return types.PackageInfo{}, err

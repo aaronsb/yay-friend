@@ -32,6 +32,13 @@ import (
 // Out is where rendered output goes. Swappable for tests.
 var Out io.Writer = os.Stdout
 
+// Err is where warnings go, separately from Out. It is its own writer because
+// the two streams part company on the machine-readable commands: `grade` and
+// `analyze --json` move Out to stderr so stdout carries only the JSON, and a
+// warning still has to land somewhere a test can read it. Defaults to stderr,
+// which is where a warning belongs when nothing has been redirected.
+var Err io.Writer = os.Stderr
+
 const (
 	minWidth = 40
 	maxWidth = 72
@@ -197,7 +204,7 @@ func Ask(format string, a ...any) {
 // voice prefix -- a warning from yay-friend must still be attributable to
 // yay-friend -- and goes to stderr.
 func Warn(format string, a ...any) {
-	fmt.Fprintln(os.Stderr, voiceStyle.Render("::")+" "+
+	fmt.Fprintln(Err, voiceStyle.Render("::")+" "+
 		entropyStyle(types.EntropyModerate).Render("warning")+" "+fmt.Sprintf(format, a...))
 }
 
