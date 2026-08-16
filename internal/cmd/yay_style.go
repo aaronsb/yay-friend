@@ -15,7 +15,10 @@ import (
 // registration, because keeping a second copy here is what let --noconfirm be a
 // flag on one path and a package name on the other.
 func RunYayStyleCommand(ctx context.Context, args []string) error {
-	passthrough := consumeOwnFlags(args)
+	passthrough, err := consumeOwnFlags(args)
+	if err != nil {
+		return err
+	}
 
 	// cobra.OnInitialize does not fire on this path, so the setup it normally
 	// performs has to happen explicitly. Without this, --no-color and the

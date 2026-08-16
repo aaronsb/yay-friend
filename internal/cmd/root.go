@@ -12,6 +12,7 @@ import (
 	"github.com/aaronsb/yay-friend/internal/config"
 	"github.com/aaronsb/yay-friend/internal/types"
 	"github.com/aaronsb/yay-friend/internal/ui"
+	"github.com/aaronsb/yay-friend/internal/version"
 	"github.com/aaronsb/yay-friend/internal/yay"
 )
 
@@ -46,6 +47,10 @@ analyzing packages for suspicious patterns, malicious code, and security risks.`
 	CompletionOptions: cobra.CompletionOptions{
 		DisableDefaultCmd: true,
 	},
+	// main.go routes --version to cobra, but without this cobra registers no
+	// such flag; FParseErrWhitelist absorbed it, RunE saw no arguments, and
+	// --version printed the help text.
+	Version: version.String(),
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -115,6 +120,26 @@ func withNoConfirmFlag(flags []string, noConfirm bool) []string {
 	return append(flags, "--noconfirm")
 }
 
+// installs reports whether an operation builds or installs packages, and so
+// runs code from a PKGBUILD.
+func installs(operation string) bool {
+	return operation == "install" || operation == "upgrade"
+}
+
+// warnUnanalyzed says out loud that packages are about to be built without the
+// analysis this tool exists to perform. Silence here reads as approval.
+func warnUnanalyzed() {
+	switch {
+	case skipAnalysis:
+		ui.Warn("--skip-analysis: handing this straight to yay, unexamined")
+	default:
+		ui.Warn("no package named, so nothing is analyzed; yay decides what to build")
+	}
+	if noConfirm {
+		ui.Warn("--noconfirm also waives yay's PKGBUILD review: every build runs unattended")
+	}
+}
+
 // runInstall handles the main package installation workflow
 func runInstall(ctx context.Context, args []string) error {
 	// Naming no operation used to mean `yay -Syu`: a whole-system upgrade with
@@ -160,6 +185,16 @@ func runInstall(ctx context.Context, args []string) error {
 		if operation.Operation == "analyze" {
 			// For analyze-only mode, don't try to install
 			return fmt.Errorf("no packages specified for analysis")
+		}
+		// `yay-friend -Syu` names no package, so there is nothing here to
+		// analyze and yay rebuilds every AUR package it finds -- running each
+		// PKGBUILD's prepare(), pkgver() and build() as it goes. That is the
+		// most common yay invocation there is, and the analysis this tool exists
+		// for does not happen on it. Adding --noconfirm removes the last
+		// checkpoint, yay's own PKGBUILD review, so say plainly what is about to
+		// run unexamined.
+		if installs(operation.Operation) {
+			warnUnanalyzed()
 		}
 		return yayClient.InstallPackages(ctx, operation)
 	}

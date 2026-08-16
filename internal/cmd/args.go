@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -46,8 +47,21 @@ func boolOpts() []boolOpt {
 
 func stringOpts() []stringOpt {
 	return []stringOpt{
-		{"config", &cfgFile, "config file (default is ${XDG_CONFIG_HOME:-$HOME/.config}/yay-friend/config.yaml)"},
 		{"provider", &provider, "AI provider to use (claude, qwen, copilot, goose)"},
+	}
+}
+
+// cobraOnlyStringOpts are options yay-friend answers for on the subcommand path
+// and deliberately does not claim on the yay-style path.
+//
+// --config is pacman's too (`pacman --config <path>`), and on a yay-style
+// command line that is whose it is: there is a yay downstream expecting it.
+// `yay-friend analyze --config x.yaml` has no downstream, so there it is ours.
+// Consuming it on both paths would have made `yay-friend -S --config
+// /etc/pacman.conf foo` try to read pacman.conf as yay-friend's YAML and abort.
+func cobraOnlyStringOpts() []stringOpt {
+	return []stringOpt{
+		{"config", &cfgFile, "config file for yay-friend itself (default is ${XDG_CONFIG_HOME:-$HOME/.config}/yay-friend/config.yaml); on a yay-style command line --config belongs to pacman and is forwarded"},
 	}
 }
 
@@ -57,7 +71,7 @@ func registerOwnFlags(cmd *cobra.Command) {
 	for _, o := range boolOpts() {
 		flags.BoolVarP(o.target, o.name, o.shorthand, false, o.usage)
 	}
-	for _, o := range stringOpts() {
+	for _, o := range append(stringOpts(), cobraOnlyStringOpts()...) {
 		flags.StringVar(o.target, o.name, "", o.usage)
 	}
 }
@@ -68,7 +82,7 @@ func registerOwnFlags(cmd *cobra.Command) {
 // Anything unrecognised is forwarded rather than interpreted. That is the whole
 // contract of a passthrough wrapper -- yay grows flags on its own schedule, and
 // guessing at one is worse than handing it over.
-func consumeOwnFlags(args []string) []string {
+func consumeOwnFlags(args []string) ([]string, error) {
 	bools := map[string]*bool{}
 	for _, o := range boolOpts() {
 		bools["--"+o.name] = o.target
@@ -92,10 +106,16 @@ func consumeOwnFlags(args []string) []string {
 		if target, ok := strs[arg]; ok {
 			// `--provider claude`: the value is the next argument, and must not
 			// be left behind to be read as a package name.
-			if i+1 < len(args) {
-				*target = args[i+1]
-				i++
+			//
+			// A missing value is an error rather than a shrug. Dropping it left
+			// the option unset and the run continuing against the configured
+			// default -- a different provider than the one asked for, chosen
+			// silently.
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("flag needs an argument: %s", arg)
 			}
+			*target = args[i+1]
+			i++
 			continue
 		}
 		if name, value, found := strings.Cut(arg, "="); found {
@@ -107,5 +127,5 @@ func consumeOwnFlags(args []string) []string {
 
 		rest = append(rest, arg)
 	}
-	return rest
+	return rest, nil
 }

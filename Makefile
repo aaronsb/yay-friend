@@ -14,7 +14,14 @@ VERSION_PKG := $(MODULE)/internal/version
 # v0.2.0 exactly on the tag; v0.2.0-3-gabc1234 three commits later; the bare
 # short hash before the first tag ever exists. -dirty when the tree has edits,
 # because a binary built from uncommitted code should say so.
-VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo dev)
+#
+# The fallback is a second assignment rather than a `|| echo dev` inside the
+# pipeline: the shell's `||` sees the exit status of `sed`, which is 0 even when
+# git printed nothing, so the fallback never fired and a build outside a git
+# checkout -- a release tarball, a distro build -- linked an empty version
+# string.
+VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')
+VERSION    := $(if $(strip $(VERSION)),$(VERSION),dev)
 GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 # SOURCE_DATE_EPOCH is honored so a distro build can be reproducible.
 BUILD_DATE ?= $(shell date -u -d "@$${SOURCE_DATE_EPOCH:-$$(date +%s)}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ)
