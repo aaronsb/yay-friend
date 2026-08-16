@@ -44,7 +44,7 @@ You can analyze:
 
 With --json, the full analysis is written to stdout as JSON and everything else
 goes to stderr. That shape is yay-friend's own and carries more than any grading
-contract does; for a pacrat-grade/v1 report, use "yay-friend grade".`,
+contract does; for the structured output report, use "yay-friend grade".`,
 		Args:         cobra.MaximumNArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {

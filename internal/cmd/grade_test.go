@@ -123,9 +123,11 @@ func gradeHarness(t *testing.T) (*fakeProvider, string, gradeRunner) {
 	home := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
-	t.Setenv("PACRAT_PACKAGE", "")
-	t.Setenv("PACRAT_TREE", "")
-	t.Setenv("PACRAT_COMMIT", "")
+	// Both spellings, or one left set in the ambient environment decides a test.
+	for _, name := range []string{"PACKAGE", "TREE", "COMMIT"} {
+		t.Setenv("YAY_FRIEND_"+name, "")
+		t.Setenv("PACRAT_"+name, "")
+	}
 
 	fake := &fakeProvider{analysis: cleanAnalysis()}
 	restore := resolveProvider
@@ -167,9 +169,9 @@ func decodeGrading(t *testing.T, stdout string) grade.Report {
 
 func TestGradeTakesItsSubjectFromTheEnvironment(t *testing.T) {
 	_, tree, run := gradeHarness(t)
-	t.Setenv("PACRAT_PACKAGE", "hello")
-	t.Setenv("PACRAT_TREE", tree)
-	t.Setenv("PACRAT_COMMIT", testCommit)
+	t.Setenv("YAY_FRIEND_PACKAGE", "hello")
+	t.Setenv("YAY_FRIEND_TREE", tree)
+	t.Setenv("YAY_FRIEND_COMMIT", testCommit)
 
 	stdout, stderr, err := run()
 	if err != nil {
@@ -185,9 +187,9 @@ func TestGradeTakesItsSubjectFromTheEnvironment(t *testing.T) {
 
 func TestGradeFlagsBeatTheEnvironment(t *testing.T) {
 	_, tree, run := gradeHarness(t)
-	t.Setenv("PACRAT_PACKAGE", "from-env")
-	t.Setenv("PACRAT_TREE", "/nonexistent")
-	t.Setenv("PACRAT_COMMIT", otherCommit)
+	t.Setenv("YAY_FRIEND_PACKAGE", "from-env")
+	t.Setenv("YAY_FRIEND_TREE", "/nonexistent")
+	t.Setenv("YAY_FRIEND_COMMIT", otherCommit)
 
 	stdout, stderr, err := run("--package", "hello", "--tree", tree, "--commit", testCommit)
 	if err != nil {
@@ -204,8 +206,8 @@ func TestGradeFlagsBeatTheEnvironment(t *testing.T) {
 // merged per field, not chosen between.
 func TestGradeMixesFlagsAndEnvironmentPerField(t *testing.T) {
 	_, tree, run := gradeHarness(t)
-	t.Setenv("PACRAT_PACKAGE", "hello")
-	t.Setenv("PACRAT_TREE", tree)
+	t.Setenv("YAY_FRIEND_PACKAGE", "hello")
+	t.Setenv("YAY_FRIEND_TREE", tree)
 
 	stdout, stderr, err := run("--commit", testCommit)
 	if err != nil {
@@ -225,9 +227,9 @@ func TestGradeWithoutASubjectIsAUsageError(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"nothing at all", nil, "PACRAT_PACKAGE"},
-		{"no tree", []string{"--package", "hello", "--commit", testCommit}, "PACRAT_TREE"},
-		{"no commit", []string{"--package", "hello", "--tree", tree}, "PACRAT_COMMIT"},
+		{"nothing at all", nil, "YAY_FRIEND_PACKAGE"},
+		{"no tree", []string{"--package", "hello", "--commit", testCommit}, "YAY_FRIEND_TREE"},
+		{"no commit", []string{"--package", "hello", "--tree", tree}, "YAY_FRIEND_COMMIT"},
 		{"not a package name", []string{"--package", "../etc", "--tree", tree, "--commit", testCommit}, "not a package name"},
 		{"not hex", []string{"--package", "hello", "--tree", tree, "--commit", "nothex"}, "not a commit hash"},
 		{"too short", []string{"--package", "hello", "--tree", tree, "--commit", "abc123"}, "too short"},
@@ -463,8 +465,11 @@ func TestGradeFailuresWriteNothingToStdout(t *testing.T) {
 	})
 }
 
-// pacrat's setup interview probes exactly this to decide whether the installed
-// binary speaks the contract natively.
+// A host's setup probe reads the help to decide whether the installed binary
+// speaks the contract natively -- pacrat's interview greps for exactly this
+// string. Renaming the feature to "structured output" removed it from the help
+// once already; the contract name has to stay printed even though the prose
+// around it no longer leads with pacrat.
 func TestGradeHelpExitsZero(t *testing.T) {
 	_, _, run := gradeHarness(t)
 
@@ -548,5 +553,62 @@ func TestAFIFONamedPKGBUILDIsRefusedNotHung(t *testing.T) {
 	}
 	if stdout != "" {
 		t.Errorf("a failure wrote to stdout: %q", stdout)
+	}
+}
+
+// TestSubjectFromEitherEnvironmentSpelling pins the compatibility promise made
+// when the feature was renamed to structured output. YAY_FRIEND_* is the name a
+// host should set; PACRAT_* is still read because pacrat shipped against it and
+// exports it for every grader run. An install that works today has to keep
+// working, so both are exercised rather than described.
+func TestSubjectFromEitherEnvironmentSpelling(t *testing.T) {
+	for _, prefix := range []string{"YAY_FRIEND", "PACRAT"} {
+		t.Run(prefix, func(t *testing.T) {
+			_, tree, run := gradeHarness(t)
+			t.Setenv(prefix+"_PACKAGE", "hello")
+			t.Setenv(prefix+"_TREE", tree)
+			t.Setenv(prefix+"_COMMIT", testCommit)
+
+			stdout, stderr, err := run()
+			if err != nil {
+				t.Fatalf("grade failed: %v\n%s", err, stderr)
+			}
+			report := decodeGrading(t, stdout)
+			want := grade.Subject{Package: "hello", Commit: testCommit, Version: "2.12.1-1"}
+			if report.Subject != want {
+				t.Errorf("subject = %+v, want %+v", report.Subject, want)
+			}
+		})
+	}
+}
+
+// TestCanonicalEnvironmentNameWins covers a host that sets both, which is what a
+// migrating one does mid-flight.
+func TestCanonicalEnvironmentNameWins(t *testing.T) {
+	_, tree, run := gradeHarness(t)
+	t.Setenv("YAY_FRIEND_PACKAGE", "hello")
+	t.Setenv("YAY_FRIEND_TREE", tree)
+	t.Setenv("YAY_FRIEND_COMMIT", testCommit)
+	t.Setenv("PACRAT_PACKAGE", "stale")
+	t.Setenv("PACRAT_TREE", "/nonexistent")
+	t.Setenv("PACRAT_COMMIT", otherCommit)
+
+	stdout, stderr, err := run()
+	if err != nil {
+		t.Fatalf("grade failed: %v\n%s", err, stderr)
+	}
+	report := decodeGrading(t, stdout)
+	if report.Subject.Package != "hello" || report.Subject.Commit != testCommit {
+		t.Errorf("subject = %+v, want the YAY_FRIEND_* values to win", report.Subject)
+	}
+}
+
+// TestContractIsUnchangedByTheRename is the whole point of keeping the wire
+// value: the report a reader parses must be byte-identical to what it parsed
+// before the feature was renamed.
+func TestContractIsUnchangedByTheRename(t *testing.T) {
+	if grade.Contract != "pacrat-grade/v1" {
+		t.Errorf("contract = %q, want %q: renaming it breaks every existing reader",
+			grade.Contract, "pacrat-grade/v1")
 	}
 }

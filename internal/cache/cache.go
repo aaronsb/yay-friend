@@ -301,7 +301,7 @@ func (c *CacheManager) GetPackageVersions(packageName string) ([]string, error) 
 }
 
 // ShortHash abbreviates a commit hash for display. It does not assume a full
-// 40-character object id: a hash can arrive already abbreviated (pacrat's
+// 40-character object id: a hash can arrive already abbreviated (a caller's
 // grading contract accepts seven characters and up), and a fixed [:8] slice
 // panics on one.
 func ShortHash(commitHash string) string {

@@ -140,7 +140,8 @@ func TestAnalyzeJSONCarriesTheWholeAnalysis(t *testing.T) {
 	}
 }
 
-// The teaching contrast: this is yay-friend's own shape, not pacrat's. A host
+// The teaching contrast: this is yay-friend's own shape, not the grading
+// contract's. A host
 // that wants a grading runs `yay-friend grade`; a host that wants everything
 // runs this and shapes it itself.
 func TestAnalyzeJSONIsNotAGradingContract(t *testing.T) {

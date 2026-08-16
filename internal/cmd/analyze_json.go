@@ -21,7 +21,7 @@ const (
 // plus the context it was produced in.
 //
 // It is deliberately not a grading contract. `yay-friend grade` emits
-// pacrat-grade/v1, which is a narrow answer to one question and drops
+// the structured output contract, which is a narrow answer to one question and drops
 // everything a host cannot act on; this carries the opposite bias — the
 // educational summary, the per-finding suggestions and notes, the
 // predictability score, the AUR community numbers — because a caller shaping
