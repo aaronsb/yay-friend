@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -343,5 +344,52 @@ func TestACachedEntryDeclaringAnotherPackageIsRefused(t *testing.T) {
 	// The un-tampered entry still replays under its own name.
 	if _, err := cacheManager.GetCachedEntry("evil-other", commitHash); err != nil {
 		t.Errorf("the honest entry stopped replaying: %v", err)
+	}
+}
+
+// TestAnEntryFromAnOlderCacheVersionIsRetired covers the upgrade path for the
+// fetch fix. Entries are keyed by AUR commit hash, so a package whose PKGBUILD
+// has not moved is never re-analyzed on its own -- a verdict reached over Arch
+// GitLab's sign-in page would otherwise outlive the bug that produced it.
+func TestAnEntryFromAnOlderCacheVersionIsRetired(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "yay-friend-cache-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	cacheManager := &CacheManager{cacheDir: tmpDir}
+
+	commitHash := "1234567890abcdef1234567890abcdef12345678"
+	analysis := &types.SecurityAnalysis{
+		PackageName: "ya-claude-code",
+		Summary:     "No PKGBUILD was actually analyzed.",
+		AnalyzedAt:  time.Now(),
+	}
+	if err := cacheManager.SaveAnalysis("ya-claude-code", commitHash, analysis); err != nil {
+		t.Fatal(err)
+	}
+
+	// Rewrite the entry as a pre-fix one, through the real writer.
+	path := cacheManager.getCacheFilePath("ya-claude-code", commitHash)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cached CachedAnalysis
+	if err := json.Unmarshal(data, &cached); err != nil {
+		t.Fatal(err)
+	}
+	cached.CacheMetadata.CacheVersion = "1.0"
+	if data, err = json.Marshal(cached); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := cacheManager.GetCachedEntry("ya-claude-code", commitHash); err == nil {
+		t.Fatal("an entry written before the fetch fix was replayed")
+	} else if !strings.Contains(err.Error(), "cache miss") {
+		t.Errorf("a retired entry should read as a miss so the caller re-analyzes: %v", err)
 	}
 }

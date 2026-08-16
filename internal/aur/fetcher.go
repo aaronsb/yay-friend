@@ -128,6 +128,32 @@ func (f *AURFetcher) enrichFromAURData(aurData *AURPackageInfo, pkgInfo *types.P
 	// Set metadata
 	pkgInfo.Votes = aurData.NumVotes
 	pkgInfo.Popularity = aurData.Popularity
+
+	// The RPC response knows things the PKGBUILD cannot say, and the analyzer
+	// weighs all of it as a trust signal -- so anything left blank here is not a
+	// gap, it is a fabricated one. A package with a maintainer and a published
+	// version reaching the provider as "Maintainer: Unknown, Version: (empty)"
+	// gets marked down for exactly the risk the response in hand disproves.
+	switch {
+	case aurData.Maintainer == "":
+		// An orphaned package keeps whatever `# Maintainer:` comment its last
+		// maintainer left behind, so that comment cannot answer who is
+		// accountable for it now. Nobody is, and that is the signal.
+		pkgInfo.Maintainer = "Orphaned (no AUR maintainer)"
+	case pkgInfo.Maintainer == "" || pkgInfo.Maintainer == "Unknown":
+		pkgInfo.Maintainer = aurData.Maintainer
+	}
+	// The PKGBUILD is preferred where it spoke: its pkgver is the version being
+	// built, while the RPC carries the pkgrel-qualified version last published.
+	if pkgInfo.Version == "" {
+		pkgInfo.Version = aurData.Version
+	}
+	if pkgInfo.Description == "" {
+		pkgInfo.Description = aurData.Description
+	}
+	if pkgInfo.URL == "" {
+		pkgInfo.URL = aurData.URL
+	}
 	
 	// Set dependencies for analysis
 	pkgInfo.Dependencies = aurData.Depends

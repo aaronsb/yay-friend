@@ -427,3 +427,34 @@ func TestParseErrorIsReported(t *testing.T) {
 		t.Fatal("Parse succeeded on malformed input, want error")
 	}
 }
+
+// TestLooksLike covers the fetch check. The HTML case is the one that motivated
+// it: `yay -G --print` on a package that a binary repository shadows prints
+// Arch's GitLab sign-in page and exits 0, and that page went to the analyzer as
+// the PKGBUILD.
+func TestLooksLike(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		src  string
+		want bool
+	}{
+		{"plain pkgbuild", "# Maintainer: A <a@b.c>\npkgname=foo\npkgver=1.0\n", true},
+		{"yay header prefix", "# foo\n\npkgname=foo\n", true},
+		{"pkgbase only", "pkgbase=foo\npkgname=('foo' 'foo-docs')\n", true},
+		{"indented", "\tpkgname=foo\n", true},
+		{"unparseable but real", "pkgname=foo\ndepends=(unclosed\n", true},
+
+		{"gitlab sign-in page", "# foo\n\n<!DOCTYPE html>\n<html>\n<title>Sign in · GitLab</title>\n", false},
+		{"yay not-found line", " -> Unable to find the following packages: foo\n", false},
+		{"empty", "", false},
+		{"header only", "# foo\n\n", false},
+		{"underscore prefix alone", "_pkgname=foo\n_pkgbase=foo\n", false},
+		{"mentioned in prose", "# this file sets pkgname= later\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := LooksLike(tc.src); got != tc.want {
+				t.Errorf("LooksLike() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

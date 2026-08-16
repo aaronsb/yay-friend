@@ -17,6 +17,7 @@ package pkgbuild
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -115,6 +116,24 @@ func Parse(src string) (*Vars, error) {
 
 	v.maintainer = findMaintainer(src)
 	return v, nil
+}
+
+// nameDecl matches a pkgname= or pkgbase= assignment at the start of a line.
+// The leading boundary is what keeps `_pkgname=` -- present in most PKGBUILDs
+// that use the -bin/-git idiom -- from answering for the real declaration.
+var nameDecl = regexp.MustCompile(`(?m)^[ \t]*(pkgname|pkgbase)=`)
+
+// LooksLike reports whether src is plausibly a PKGBUILD at all.
+//
+// This answers "did we fetch the right thing", not "is this safe", and the two
+// want opposite thresholds. It is deliberately loose and deliberately not Parse:
+// every PKGBUILD declares pkgname or pkgbase, so source that declares neither is
+// something other than a PKGBUILD -- an HTML error page, a "package not found"
+// line, an empty response -- while source that does declare one belongs in front
+// of the analyzer even when Parse rejects it, because bash that will not parse is
+// itself a reason to look closer.
+func LooksLike(src string) bool {
+	return nameDecl.MatchString(src)
 }
 
 // Str returns a scalar declaration, or "" if absent.
