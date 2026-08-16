@@ -184,7 +184,65 @@ func (y *YayClient) SearchPackages(ctx context.Context, query string) ([]Package
 	return results, nil
 }
 
-// ParseYayCommand parses a yay command into a YayOperation
+// valueTakingFlags are the pacman and yay long options whose value is a
+// separate argument. Without them the value lands in the package list: with
+// `-S --answerdiff None pkg`, "None" became a package name, and yay-friend went
+// off to analyze a package by that name.
+//
+// The list is deliberately partial and conservative, covering the options that
+// take a value in pacman(8) and yay(8). Being wrong in the other direction is
+// the expensive mistake -- naming an option here that takes no value would eat
+// the package after it -- so an option is listed only when its value argument is
+// certain. Anything missing degrades to the old behaviour for that one option,
+// which surfaces as a visible "package not found", not as a silent wrong action.
+var valueTakingFlags = map[string]bool{
+	// pacman(8)
+	"--config": true, "--dbpath": true, "--root": true, "--cachedir": true,
+	"--gpgdir": true, "--hookdir": true, "--logfile": true, "--arch": true,
+	"--color": true, "--ignore": true, "--ignoregroup": true,
+	"--assume-installed": true, "--print-format": true, "--sysroot": true,
+	"--overwrite": true,
+	// yay(8)
+	"--answerclean": true, "--answerdiff": true, "--answeredit": true,
+	"--answerupgrade": true, "--builddir": true, "--editor": true,
+	"--editorflags": true, "--makepkg": true, "--mflags": true, "--pacman": true,
+	"--git": true, "--gitflags": true, "--gpg": true, "--gpgflags": true,
+	"--sudo": true, "--sudoflags": true, "--requestsplitn": true,
+	"--completioninterval": true, "--sortby": true, "--searchby": true,
+	"--aururl": true, "--aurrpcurl": true, "--limit": true,
+	"--makepkgconf": true, "--pacmanconf": true,
+}
+
+// takesValue reports whether flag consumes the argument after it.
+func takesValue(flag string) bool {
+	// `--opt=value` carries its own value; only the separated form can strand one.
+	if strings.Contains(flag, "=") {
+		return false
+	}
+	return valueTakingFlags[flag]
+}
+
+// splitFlagsAndPackages files each argument as a flag or a package name.
+//
+// A flag's value goes with the flag: `--answerdiff None` is one option and its
+// argument, not an option and a package called "None". Both branches of
+// ParseYayCommand share this so they cannot disagree about which is which.
+func splitFlagsAndPackages(args []string, operation *types.YayOperation) {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if !strings.HasPrefix(arg, "-") {
+			operation.Packages = append(operation.Packages, arg)
+			continue
+		}
+		operation.Flags = append(operation.Flags, arg)
+		if takesValue(arg) && i+1 < len(args) {
+			operation.Flags = append(operation.Flags, args[i+1])
+			i++
+		}
+	}
+}
+
+// ParseYayCommand parses a yay command into a YayOperation.
 func ParseYayCommand(args []string) (*types.YayOperation, error) {
 	if len(args) == 0 {
 		return &types.YayOperation{
@@ -214,23 +272,23 @@ func ParseYayCommand(args []string) (*types.YayOperation, error) {
 		}
 
 		// Separate flags from packages
-		for i := 1; i < len(args); i++ {
-			arg := args[i]
-			if strings.HasPrefix(arg, "-") {
-				operation.Flags = append(operation.Flags, arg)
-			} else {
-				operation.Packages = append(operation.Packages, arg)
-			}
-		}
+		splitFlagsAndPackages(args[1:], operation)
 
 		return operation, nil
 	} else {
 		// First arg is not a flag, assume it's just analysis (no install)
-		return &types.YayOperation{
+		operation := &types.YayOperation{
 			Command:   "", // No command means analyze-only
 			Operation: "analyze",
 			Flags:     []string{},
-			Packages:  args, // All args are packages
-		}, nil
+			Packages:  []string{},
+		}
+
+		// Flags are separated here for the same reason as above. Filing every
+		// argument as a package name meant `yay-friend pkg --needed` went looking
+		// for a package called "--needed", found none, and offered a search.
+		splitFlagsAndPackages(args, operation)
+
+		return operation, nil
 	}
 }

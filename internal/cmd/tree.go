@@ -1,11 +1,12 @@
 package cmd
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Morganamilo/go-srcinfo"
 
 	"github.com/aaronsb/yay-friend/internal/pkgbuild"
 	"github.com/aaronsb/yay-friend/internal/types"
@@ -173,43 +174,23 @@ func treeVersion(dir string) string {
 	return joinVersion(vars.Str("epoch"), vars.Str("pkgver"), vars.Str("pkgrel"))
 }
 
-// srcinfoVersion reads epoch/pkgver/pkgrel out of a .SRCINFO. The format is
-// "key = value" lines, indented under pkgbase; the first declaration of each
-// key is the package-wide one, and a later per-package override is not what a
-// grading is about.
+// srcinfoVersion reads the package-wide version out of a .SRCINFO.
+//
+// Parsing is go-srcinfo's, the same parser yay uses. The hand-rolled reader it
+// replaces scanned for "key = value" with no notion of the pkgbase/pkgname
+// sections the format is built from, and leaned on first-occurrence ordering to
+// stay on the pkgbase one. That held for the files it was tried against, which
+// is a different claim from holding for the format.
+//
+// Version() reports the pkgbase version; a split package's per-package override
+// is deliberately not consulted, because a grading is about the tree, not one
+// output package of it.
 func srcinfoVersion(path string) string {
-	f, err := os.Open(path)
+	info, err := srcinfo.ParseFile(path)
 	if err != nil {
 		return ""
 	}
-	defer f.Close()
-
-	var epoch, pkgver, pkgrel string
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		key, value, found := strings.Cut(scanner.Text(), "=")
-		if !found {
-			continue
-		}
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		switch key {
-		case "epoch":
-			if epoch == "" {
-				epoch = value
-			}
-		case "pkgver":
-			if pkgver == "" {
-				pkgver = value
-			}
-		case "pkgrel":
-			if pkgrel == "" {
-				pkgrel = value
-			}
-		}
-	}
-
-	return joinVersion(epoch, pkgver, pkgrel)
+	return info.Version()
 }
 
 func joinVersion(epoch, pkgver, pkgrel string) string {

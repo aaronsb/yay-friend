@@ -20,7 +20,7 @@ func main() {
 		firstArg := os.Args[1]
 		// Known subcommands that should use cobra
 		knownCommands := []string{"analyze", "grade", "config", "provider", "cache", "version", "help", "completion", "--help", "-h", "--version"}
-		
+
 		isKnownCommand := false
 		for _, cmdName := range knownCommands {
 			if firstArg == cmdName {
@@ -28,7 +28,7 @@ func main() {
 				break
 			}
 		}
-		
+
 		// If it's not a known subcommand, handle it as a yay-style command
 		if !isKnownCommand {
 			// This is a yay-style command (packages, -S packages, etc.)

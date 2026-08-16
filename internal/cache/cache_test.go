@@ -25,7 +25,7 @@ func TestCacheManager_BasicOperations(t *testing.T) {
 	// Test data
 	packageName := "test-package"
 	commitHash := "1234567890abcdef1234567890abcdef12345678"
-	
+
 	analysis := &types.SecurityAnalysis{
 		PackageName:    packageName,
 		OverallLevel:   types.SecurityLow,
@@ -273,12 +273,12 @@ func TestValidateCommitHash(t *testing.T) {
 		hash  string
 		valid bool
 	}{
-		{"1234567890abcdef1234567890abcdef12345678", true},  // Valid
-		{"1234567890ABCDEF1234567890ABCDEF12345678", true},  // Valid with uppercase
-		{"1234567890abcdef1234567890abcdef1234567", false},  // Too short
+		{"1234567890abcdef1234567890abcdef12345678", true},   // Valid
+		{"1234567890ABCDEF1234567890ABCDEF12345678", true},   // Valid with uppercase
+		{"1234567890abcdef1234567890abcdef1234567", false},   // Too short
 		{"1234567890abcdef1234567890abcdef123456789", false}, // Too long
 		{"1234567890abcdefg234567890abcdef12345678", false},  // Invalid character 'g'
-		{"", false}, // Empty
+		{"", false},                  // Empty
 		{"not-a-hash-at-all", false}, // Invalid format
 	}
 
@@ -300,6 +300,7 @@ func TestValidateCommitHash(t *testing.T) {
 		}
 	}
 }
+
 // A copied or hand-edited entry declaring another package is a grading of
 // something else wearing the right filename; replaying it would launder that
 // analysis into an answer about this package. The adapter refuses this exact

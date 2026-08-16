@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -166,5 +167,86 @@ func TestYayFailureIsReported(t *testing.T) {
 
 	if _, err := client.GetPackageInfo(context.Background(), "whatever"); err == nil {
 		t.Fatal("GetPackageInfo succeeded, want error")
+	}
+}
+
+// TestBarePackageSeparatesFlags covers the branch taken when the first argument
+// is a package name rather than a yay operation. It used to file every argument
+// as a package, so `yay-friend pkg --needed` searched for a package named
+// "--needed" and offered an install selection instead of analyzing pkg.
+func TestBarePackageSeparatesFlags(t *testing.T) {
+	op, err := ParseYayCommand([]string{"ya-claude-code", "--needed", "another-pkg"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := op.Operation, "analyze"; got != want {
+		t.Errorf("Operation = %q, want %q", got, want)
+	}
+	if got, want := len(op.Packages), 2; got != want {
+		t.Fatalf("Packages = %v, want %d entries", op.Packages, want)
+	}
+	if op.Packages[0] != "ya-claude-code" || op.Packages[1] != "another-pkg" {
+		t.Errorf("Packages = %v, want the two package names only", op.Packages)
+	}
+	if len(op.Flags) != 1 || op.Flags[0] != "--needed" {
+		t.Errorf("Flags = %v, want [--needed]", op.Flags)
+	}
+}
+
+// TestFlagValuesAreNotPackageNames covers the argument that belongs to the flag
+// before it. `--answerdiff None` filed "None" as a package, and yay-friend went
+// looking for one -- offering a search selection, or under --noconfirm failing
+// outright. Both branches of ParseYayCommand had it.
+func TestFlagValuesAreNotPackageNames(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		args         []string
+		wantPackages []string
+		wantFlags    []string
+	}{
+		{
+			"operation branch",
+			[]string{"-S", "--answerdiff", "None", "pkg"},
+			[]string{"pkg"},
+			[]string{"--answerdiff", "None"},
+		},
+		{
+			"bare package branch",
+			[]string{"pkg", "--answerdiff", "None"},
+			[]string{"pkg"},
+			[]string{"--answerdiff", "None"},
+		},
+		{
+			"value-less flag keeps the package",
+			[]string{"-S", "--needed", "pkg"},
+			[]string{"pkg"},
+			[]string{"--needed"},
+		},
+		{
+			"joined form needs no lookahead",
+			[]string{"-S", "--answerdiff=None", "pkg"},
+			[]string{"pkg"},
+			[]string{"--answerdiff=None"},
+		},
+		{
+			"trailing value-taking flag does not run off the end",
+			[]string{"-S", "pkg", "--builddir"},
+			[]string{"pkg"},
+			[]string{"--builddir"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			op, err := ParseYayCommand(tc.args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(op.Packages, tc.wantPackages) {
+				t.Errorf("Packages = %v, want %v", op.Packages, tc.wantPackages)
+			}
+			if !reflect.DeepEqual(op.Flags, tc.wantFlags) {
+				t.Errorf("Flags = %v, want %v", op.Flags, tc.wantFlags)
+			}
+		})
 	}
 }

@@ -90,17 +90,17 @@ type Report struct {
 }
 
 var (
-	sumsArrayRe  = regexp.MustCompile(`(?s)\b(?:ck|md5|sha1|sha224|sha256|sha384|sha512|b2)sums\w*=\(([^)]*)\)`)
-	pgpKeysRe    = regexp.MustCompile(`(?s)validpgpkeys=\(([^)]*)\)`)
-	sourceRe     = regexp.MustCompile(`(?s)\bsource\w*=\(([^)]*)\)`)
-	arrayOpenRe  = regexp.MustCompile(`^\s*(?:source|validpgpkeys|(?:ck|md5|sha1|sha224|sha256|sha384|sha512|b2)sums)\w*=\(`)
-	funcHeadRe   = regexp.MustCompile(`^\s*([a-zA-Z0-9_]+)\s*\(\)\s*\{?`)
+	sumsArrayRe = regexp.MustCompile(`(?s)\b(?:ck|md5|sha1|sha224|sha256|sha384|sha512|b2)sums\w*=\(([^)]*)\)`)
+	pgpKeysRe   = regexp.MustCompile(`(?s)validpgpkeys=\(([^)]*)\)`)
+	sourceRe    = regexp.MustCompile(`(?s)\bsource\w*=\(([^)]*)\)`)
+	arrayOpenRe = regexp.MustCompile(`^\s*(?:source|validpgpkeys|(?:ck|md5|sha1|sha224|sha256|sha384|sha512|b2)sums)\w*=\(`)
+	funcHeadRe  = regexp.MustCompile(`^\s*([a-zA-Z0-9_]+)\s*\(\)\s*\{?`)
 	// blobRe deliberately excludes '/' and '=': paths (/opt/a/b) and assignments
 	// (var=value, Key=Value) then split into short, harmless words instead of one
 	// long "high-entropy" token. Base64 padding '=' and the occasional '/' in a
 	// real payload are lost, but the remaining run stays long and opaque.
 	blobRe = regexp.MustCompile(`[A-Za-z0-9+_-]{` + fmt.Sprint(minTokenLen) + `,}`)
-	hexRe        = regexp.MustCompile(`^[0-9a-fA-F]+$`)
+	hexRe  = regexp.MustCompile(`^[0-9a-fA-F]+$`)
 )
 
 // shannon returns the Shannon entropy of s in bits per character.
