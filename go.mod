@@ -1,6 +1,6 @@
 module github.com/aaronsb/yay-friend
 
-go 1.23.0
+go 1.26.10
 
 require (
 	github.com/Morganamilo/go-srcinfo v1.0.0
